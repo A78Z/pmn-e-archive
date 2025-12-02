@@ -106,18 +106,8 @@ export default function RegisterPage() {
     try {
       const normalizedEmail = email.toLowerCase().trim();
 
-      // Check if user already exists
-      const userQuery = new Parse.Query(Parse.User);
-      userQuery.equalTo('email', normalizedEmail);
-      const existingUser = await userQuery.first();
-
-      if (existingUser) {
-        toast.error('Cet utilisateur existe déjà. Essayez de vous connecter ou utilisez un autre email.');
-        setLoading(false);
-        return;
-      }
-
-      // Sign up the user - Always create as 'user' role for security
+      // Sign up the user - Parse will handle duplicate email detection
+      // Always create as 'user' role for security
       await signUp(normalizedEmail, password, fullName, {
         fonction,
         role: 'user', // Force user role, admin must upgrade later
@@ -136,10 +126,13 @@ export default function RegisterPage() {
     } catch (error: any) {
       console.error('Registration error:', error);
 
-      if (error.message.includes('already') || error.message.includes('taken')) {
-        toast.error('Cet utilisateur existe déjà. Essayez de vous connecter ou utilisez un autre email.');
+      // Handle specific Parse errors
+      if (error.code === 202 || error.message.includes('already') || error.message.includes('taken')) {
+        toast.error('Cet email est déjà utilisé. Essayez de vous connecter ou utilisez un autre email.');
+      } else if (error.code === 125) {
+        toast.error('Email invalide. Veuillez utiliser un email au format @pmn.sn');
       } else {
-        toast.error(error.message || 'Erreur lors de la création du compte. Veuillez vérifier vos informations.');
+        toast.error(error.message || 'Erreur lors de la création du compte. Veuillez réessayer.');
       }
       setLoading(false);
     }

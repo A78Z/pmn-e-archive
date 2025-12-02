@@ -56,6 +56,26 @@ import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import JSZip from 'jszip';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+  DragStartEvent,
+  DragOverlay,
+  DragOverEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { SortableFolderRow } from '@/components/sortable-folder-row';
+
 
 export const dynamic = 'force-dynamic';
 
@@ -137,6 +157,22 @@ export default function DocumentsPage() {
     can_delete: false,
     can_share: false
   });
+
+  // Drag and Drop state
+  const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
 
   useEffect(() => {
     const savedViewMode = localStorage.getItem('pmn_folder_view_mode');
@@ -297,7 +333,7 @@ export default function DocumentsPage() {
     }
 
     try {
-      await FolderHelpers.create({
+      const newFolder = await FolderHelpers.create({
         name: newFolderName.trim(),
         created_by: profile?.id,
         parent_id: parentFolder.id,
@@ -308,20 +344,123 @@ export default function DocumentsPage() {
       toast.success('Sous-dossier créé avec succès');
       setIsNewSubFolderDialogOpen(false);
       setNewFolderName('');
+
+      // Store parent ID before clearing state
+      const parentId = parentFolder.id;
       setParentFolder(null);
 
-      // Expand the parent folder to show the new subfolder
-      const newExpanded = new Set(expandedFolders);
-      newExpanded.add(parentFolder.id);
-      setExpandedFolders(newExpanded);
+      // Optimistically update folders list
+      setFolders(prev => [...prev, newFolder as Folder]);
 
+      // Expand the parent folder to show the new subfolder
+      setExpandedFolders(prev => {
+        const newExpanded = new Set(prev);
+        newExpanded.add(parentId);
+        return newExpanded;
+      });
+
+      // Still fetch to ensure consistency, but UI is already updated
       fetchFolders();
       fetchDocuments();
+
     } catch (error) {
       console.error('Error creating subfolder:', error);
       toast.error('Erreur lors de la création du sous-dossier');
     }
   };
+
+  const canMoveFolder = (userProfile: any, folder: Folder): boolean => {
+    if (!userProfile) return false;
+    // Only admins and folder owners can move
+    return ['super_admin', 'admin'].includes(userProfile.role) || folder.created_by === userProfile.id;
+  };
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event;
+    setActiveDragId(active.id as string);
+  };
+
+  const handleDragOver = (event: DragOverEvent) => {
+    const { over } = event;
+    setOverId(over ? (over.id as string) : null);
+  };
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    setActiveDragId(null);
+    setOverId(null);
+
+    if (!over || active.id === over.id) {
+      return;
+    }
+
+    const draggedFolder = folders.find(f => f.id === active.id);
+    if (!draggedFolder) return;
+
+    // Check permissions
+    if (!canMoveFolder(profile, draggedFolder)) {
+      toast.error('Vous n\'avez pas la permission de déplacer ce dossier');
+      return;
+    }
+
+    // Determine if we're dropping onto a folder (reparent) or between folders (reorder)
+    // For now, we assume dropping ONTO a folder means reparenting
+    // We check if the over.id corresponds to a folder
+    const targetFolder = folders.find(f => f.id === over.id);
+
+    // Save previous state for rollback
+    const prevFolders = [...folders];
+
+    try {
+      if (targetFolder) {
+        // Reparent: Move into target folder
+        const newParentId = targetFolder.id;
+
+        // Optimistic UI update
+        setFolders(prev => prev.map(f =>
+          f.id === draggedFolder.id
+            ? { ...f, parent_id: newParentId }
+            : f
+        ));
+
+        // API call with cycle detection
+        await FolderHelpers.move(draggedFolder.id, newParentId);
+
+        toast.success(`Dossier déplacé dans "${targetFolder.name}"`);
+
+        // Expand the target folder to show the moved item
+        setExpandedFolders(prev => new Set([...prev, newParentId]));
+      } else {
+        // Reorder: Change position among siblings
+        // For now, we'll just update the order in the UI
+        // Backend would need an "order" field to persist this
+        const oldIndex = folders.findIndex(f => f.id === active.id);
+        const newIndex = folders.findIndex(f => f.id === over.id);
+
+        if (oldIndex !== -1 && newIndex !== -1) {
+          setFolders(arrayMove(folders, oldIndex, newIndex));
+          toast.success('Ordre des dossiers mis à jour');
+        }
+      }
+
+      // Refresh to ensure consistency
+      await fetchFolders();
+    } catch (error: any) {
+      console.error('Error moving folder:', error);
+
+      // Rollback on error
+      setFolders(prevFolders);
+
+      if (error.message?.includes('sous-dossiers')) {
+        toast.error('Impossible de déplacer un dossier dans un de ses sous-dossiers');
+      } else if (error.message?.includes('lui-même')) {
+        toast.error('Impossible de déplacer un dossier dans lui-même');
+      } else {
+        toast.error('Erreur lors du déplacement du dossier');
+      }
+    }
+  };
+
 
   const handleRename = async () => {
     if (!renameValue.trim()) return;
@@ -661,47 +800,784 @@ export default function DocumentsPage() {
       ) : (
         <Card className="border-0 shadow-md bg-white overflow-hidden">
           {viewMode === 'list' ? (
-            <div className="divide-y divide-gray-100">
-              {/* Folders List View */}
-              {filteredFolders.map((folder) => {
-                const isExpanded = expandedFolders.has(folder.id);
-                const folderDocs = getDocumentsInFolder(folder.id);
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={folders.map(f => f.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="divide-y divide-gray-100">
+                  {/* Folders List View */}
+                  {filteredFolders.map((folder) => {
+                    const isExpanded = expandedFolders.has(folder.id);
+                    const folderDocs = getDocumentsInFolder(folder.id);
 
-                return (
-                  <div key={folder.id}>
-                    {/* Folder Row */}
-                    <div className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors">
-                      <button
-                        onClick={() => toggleFolder(folder.id)}
-                        className="p-1 hover:bg-gray-200 rounded transition-colors"
-                      >
-                        {isExpanded ? (
-                          <ChevronDown className="h-5 w-5 text-gray-600" />
-                        ) : (
-                          <ChevronRight className="h-5 w-5 text-gray-600" />
-                        )}
-                      </button>
-
-                      <div className="flex items-center gap-3 flex-1 min-w-0">
-                        <Folder className="h-5 w-5 text-blue-600 flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            {folder.folder_number && (
-                              <span className="text-xs font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-                                {folder.folder_number}
-                              </span>
+                    return (
+                      <div key={folder.id}>
+                        {/* Folder Row */}
+                        <div className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors">
+                          <button
+                            onClick={() => toggleFolder(folder.id)}
+                            className="p-1 hover:bg-gray-200 rounded transition-colors"
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="h-5 w-5 text-gray-600" />
+                            ) : (
+                              <ChevronRight className="h-5 w-5 text-gray-600" />
                             )}
-                            <h3 className="font-semibold text-gray-900 truncate">{folder.name}</h3>
+                          </button>
+
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <Folder className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                {folder.folder_number && (
+                                  <span className="text-xs font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                                    {folder.folder_number}
+                                  </span>
+                                )}
+                                <h3 className="font-semibold text-gray-900 truncate">{folder.name}</h3>
+                              </div>
+                              <p className="text-sm text-gray-500">
+                                {format(new Date(folder.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                              </p>
+                            </div>
+                            {folder.status && (
+                              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                                {folder.status}
+                              </Badge>
+                            )}
                           </div>
-                          <p className="text-sm text-gray-500">
-                            {format(new Date(folder.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                          </p>
+
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56">
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedFolder(folder);
+                                  setRenameValue(folder.name);
+                                  setIsRenameDialogOpen(true);
+                                }}
+                                className="whitespace-nowrap cursor-pointer"
+                              >
+                                <Edit className="h-4 w-4 mr-2" />
+                                Renommer
+                              </DropdownMenuItem>
+                              {/* Admin only: Modify Number */}
+                              {['admin', 'super_admin'].includes(profile?.role || '') && (
+                                <DropdownMenuItem
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedFolder(folder);
+                                    setNewFolderNumber(folder.folder_number || '');
+                                    setIsModifyNumberDialogOpen(true);
+                                  }}
+                                  className="whitespace-nowrap cursor-pointer"
+                                >
+                                  <Hash className="h-4 w-4 mr-2" />
+                                  Modifier numéro
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownloadFolder(folder);
+                                }}
+                                className="whitespace-nowrap cursor-pointer"
+                              >
+                                <Download className="h-4 w-4 mr-2" />
+                                Télécharger
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedFolder(folder);
+                                  setIsPreviewDialogOpen(true);
+                                }}
+                                className="whitespace-nowrap cursor-pointer"
+                              >
+                                <Eye className="h-4 w-4 mr-2" />
+                                Prévisualiser
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedFolder(folder);
+                                  setIsShareDialogOpen(true);
+                                }}
+                                className="whitespace-nowrap cursor-pointer"
+                              >
+                                <Share2 className="h-4 w-4 mr-2" />
+                                Partager
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setParentFolder(folder);
+                                  setIsNewSubFolderDialogOpen(true);
+                                }}
+                                className="whitespace-nowrap cursor-pointer"
+                              >
+                                <FolderPlus className="h-4 w-4 mr-2" />
+                                Nouveau sous-dossier
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteFolder(folder);
+                                }}
+                                className="text-red-600 whitespace-nowrap cursor-pointer"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Supprimer
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
-                        {folder.status && (
-                          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-                            {folder.status}
-                          </Badge>
+
+                        {/* Folder Documents (when expanded) */}
+                        {isExpanded && folderDocs.length > 0 && (
+                          <div className="bg-gray-50 border-t border-gray-100">
+                            {folderDocs.map((doc) => (
+                              <div key={doc.id} className="flex items-center gap-3 p-4 pl-16 hover:bg-gray-100 transition-colors">
+                                <FileText className="h-5 w-5 text-gray-600 flex-shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                  <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
+                                  <p className="text-sm text-gray-500">
+                                    {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                                  </p>
+                                </div>
+
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                                      <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-56">
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedDocument(doc);
+                                        setRenameValue(doc.name);
+                                        setIsRenameDialogOpen(true);
+                                      }}
+                                      className="whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Edit className="h-4 w-4 mr-2" />
+                                      Renommer
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDownload(doc);
+                                      }}
+                                      className="whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Download className="h-4 w-4 mr-2" />
+                                      Télécharger
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedDocument(doc);
+                                        setIsPreviewDialogOpen(true);
+                                      }}
+                                      className="whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Eye className="h-4 w-4 mr-2" />
+                                      Prévisualiser
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedDocument(doc);
+                                        setIsShareDialogOpen(true);
+                                      }}
+                                      className="whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Share2 className="h-4 w-4 mr-2" />
+                                      Partager
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteDocument(doc);
+                                      }}
+                                      className="text-red-600 whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Supprimer
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </div>
+                            ))}
+                          </div>
                         )}
+
+                        {/* Subfolders (when expanded) */}
+                        {isExpanded && getSubFolders(folder.id).map((subfolder) => {
+                          const canMoveSubfolder = canMoveFolder(profile, subfolder);
+                          const isOverSubfolder = overId === subfolder.id;
+                          const isSubfolderExpanded = expandedFolders.has(subfolder.id);
+                          const subfolderDocs = getDocumentsInFolder(subfolder.id);
+                          const subSubfolders = getSubFolders(subfolder.id);
+
+                          return (
+                            <div key={subfolder.id} className="bg-gray-50 border-t border-gray-100 pl-8">
+                              <SortableFolderRow
+                                folder={subfolder}
+                                isExpanded={isSubfolderExpanded}
+                                isOverThis={isOverSubfolder}
+                                canMove={canMoveSubfolder}
+                                onToggle={() => toggleFolder(subfolder.id)}
+                              >
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                                      <MoreVertical className="h-4 w-4" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" className="w-56">
+                                    {/* Subfolder actions similar to folder actions */}
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedFolder(subfolder);
+                                        setRenameValue(subfolder.name);
+                                        setIsRenameDialogOpen(true);
+                                      }}
+                                      className="whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Edit className="h-4 w-4 mr-2" />
+                                      Renommer
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDownloadFolder(subfolder);
+                                      }}
+                                      className="whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Download className="h-4 w-4 mr-2" />
+                                      Télécharger
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedFolder(subfolder);
+                                        setIsPreviewDialogOpen(true);
+                                      }}
+                                      className="whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Eye className="h-4 w-4 mr-2" />
+                                      Prévisualiser
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedFolder(subfolder);
+                                        setIsShareDialogOpen(true);
+                                      }}
+                                      className="whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Share2 className="h-4 w-4 mr-2" />
+                                      Partager
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteFolder(subfolder);
+                                      }}
+                                      className="text-red-600 whitespace-nowrap cursor-pointer"
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-2" />
+                                      Supprimer
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              </SortableFolderRow>
+
+                              {/* Subfolder Contents (Documents & Nested Folders) */}
+                              {isSubfolderExpanded && (
+                                <div className="border-t border-gray-100">
+                                  {/* Nested Folders (Sub-subfolders) */}
+                                  {subSubfolders.map((subSubfolder) => {
+                                    const canMoveSubSubfolder = canMoveFolder(profile, subSubfolder);
+                                    const isOverSubSubfolder = overId === subSubfolder.id;
+                                    const isSubSubfolderExpanded = expandedFolders.has(subSubfolder.id);
+                                    const subSubfolderDocs = getDocumentsInFolder(subSubfolder.id);
+                                    const subSubSubfolders = getSubFolders(subSubfolder.id);
+
+                                    return (
+                                      <div key={subSubfolder.id} className="pl-8 bg-gray-50/50 border-t border-gray-100">
+                                        <SortableFolderRow
+                                          folder={subSubfolder}
+                                          isExpanded={isSubSubfolderExpanded}
+                                          isOverThis={isOverSubSubfolder}
+                                          canMove={canMoveSubSubfolder}
+                                          onToggle={() => toggleFolder(subSubfolder.id)}
+                                        >
+                                          <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                              <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                                                <MoreVertical className="h-4 w-4" />
+                                              </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end" className="w-56">
+                                              <DropdownMenuItem
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setSelectedFolder(subSubfolder);
+                                                  setRenameValue(subSubfolder.name);
+                                                  setIsRenameDialogOpen(true);
+                                                }}
+                                                className="whitespace-nowrap cursor-pointer"
+                                              >
+                                                <Edit className="h-4 w-4 mr-2" />
+                                                Renommer
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleDownloadFolder(subSubfolder);
+                                                }}
+                                                className="whitespace-nowrap cursor-pointer"
+                                              >
+                                                <Download className="h-4 w-4 mr-2" />
+                                                Télécharger
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setSelectedFolder(subSubfolder);
+                                                  setIsPreviewDialogOpen(true);
+                                                }}
+                                                className="whitespace-nowrap cursor-pointer"
+                                              >
+                                                <Eye className="h-4 w-4 mr-2" />
+                                                Prévisualiser
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setSelectedFolder(subSubfolder);
+                                                  setIsShareDialogOpen(true);
+                                                }}
+                                                className="whitespace-nowrap cursor-pointer"
+                                              >
+                                                <Share2 className="h-4 w-4 mr-2" />
+                                                Partager
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setParentFolder(subSubfolder);
+                                                  setIsNewSubFolderDialogOpen(true);
+                                                }}
+                                                className="whitespace-nowrap cursor-pointer"
+                                              >
+                                                <FolderPlus className="h-4 w-4 mr-2" />
+                                                Nouveau sous-dossier
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  handleDeleteFolder(subSubfolder);
+                                                }}
+                                                className="text-red-600 whitespace-nowrap cursor-pointer"
+                                              >
+                                                <Trash2 className="h-4 w-4 mr-2" />
+                                                Supprimer
+                                              </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                          </DropdownMenu>
+                                        </SortableFolderRow>
+
+                                        {/* Level 4 Content (Documents & Nested Folders) */}
+                                        {isSubSubfolderExpanded && (
+                                          <div className="border-t border-gray-100\">
+                                            {/* Level 4 Folders */}
+                                            {subSubSubfolders.map((level4Folder) => {
+                                              const canMoveLevel4 = canMoveFolder(profile, level4Folder);
+                                              const isOverLevel4 = overId === level4Folder.id;
+                                              const isLevel4Expanded = expandedFolders.has(level4Folder.id);
+                                              const level4Docs = getDocumentsInFolder(level4Folder.id);
+                                              const level5Folders = getSubFolders(level4Folder.id);
+
+                                              return (
+                                                <div key={level4Folder.id} className="pl-8 bg-gray-50/30 border-t border-gray-100">
+                                                  <SortableFolderRow
+                                                    folder={level4Folder}
+                                                    isExpanded={isLevel4Expanded}
+                                                    isOverThis={isOverLevel4}
+                                                    canMove={canMoveLevel4}
+                                                    onToggle={() => toggleFolder(level4Folder.id)}
+                                                  >
+                                                    <DropdownMenu>
+                                                      <DropdownMenuTrigger asChild>
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                                                          <MoreVertical className="h-4 w-4" />
+                                                        </Button>
+                                                      </DropdownMenuTrigger>
+                                                      <DropdownMenuContent align="end" className="w-56">
+                                                        <DropdownMenuItem
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setSelectedFolder(level4Folder);
+                                                            setRenameValue(level4Folder.name);
+                                                            setIsRenameDialogOpen(true);
+                                                          }}
+                                                          className="whitespace-nowrap cursor-pointer"
+                                                        >
+                                                          <Edit className="h-4 w-4 mr-2" />
+                                                          Renommer
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDownloadFolder(level4Folder);
+                                                          }}
+                                                          className="whitespace-nowrap cursor-pointer"
+                                                        >
+                                                          <Download className="h-4 w-4 mr-2" />
+                                                          Télécharger
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setSelectedFolder(level4Folder);
+                                                            setIsPreviewDialogOpen(true);
+                                                          }}
+                                                          className="whitespace-nowrap cursor-pointer"
+                                                        >
+                                                          <Eye className="h-4 w-4 mr-2" />
+                                                          Prévisualiser
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setSelectedFolder(level4Folder);
+                                                            setIsShareDialogOpen(true);
+                                                          }}
+                                                          className="whitespace-nowrap cursor-pointer"
+                                                        >
+                                                          <Share2 className="h-4 w-4 mr-2" />
+                                                          Partager
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setParentFolder(level4Folder);
+                                                            setIsNewSubFolderDialogOpen(true);
+                                                          }}
+                                                          className="whitespace-nowrap cursor-pointer"
+                                                        >
+                                                          <FolderPlus className="h-4 w-4 mr-2" />
+                                                          Nouveau sous-dossier
+                                                        </DropdownMenuItem>
+                                                        <DropdownMenuItem
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDeleteFolder(level4Folder);
+                                                          }}
+                                                          className="text-red-600 whitespace-nowrap cursor-pointer"
+                                                        >
+                                                          <Trash2 className="h-4 w-4 mr-2" />
+                                                          Supprimer
+                                                        </DropdownMenuItem>
+                                                      </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                  </SortableFolderRow>
+
+                                                  {/* Level 5 Content (Documents & Nested Folders) */}
+                                                  {isLevel4Expanded && (
+                                                    <div className="border-t border-gray-100 pl-8">
+                                                      {/* Level 5 Folders */}
+                                                      {level5Folders.map((level5Folder) => (
+                                                        <div key={level5Folder.id} className="flex items-center gap-3 p-4 pl-12 hover:bg-gray-100 transition-colors border-t border-gray-100">
+                                                          <Folder className="h-5 w-5 text-blue-200 flex-shrink-0" />
+                                                          <div className="flex-1 min-w-0">
+                                                            <h4 className="font-medium text-gray-900 truncate">{level5Folder.name}</h4>
+                                                            <p className="text-sm text-gray-500">
+                                                              {format(new Date(level5Folder.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                                                            </p>
+                                                          </div>
+                                                        </div>
+                                                      ))}
+
+                                                      {/* Level 5 Documents */}
+                                                      {level4Docs.map((doc) => (
+                                                        <div key={doc.id} className="flex items-center gap-3 p-4 pl-12 hover:bg-gray-100 transition-colors border-t border-gray-100">
+                                                          <FileText className="h-5 w-5 text-gray-400 flex-shrink-0" />
+                                                          <div className="flex-1 min-w-0">
+                                                            <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
+                                                            <p className="text-sm text-gray-500">
+                                                              {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                                                            </p>
+                                                          </div>
+                                                          {/* Document Actions */}
+                                                          <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild>
+                                                              <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                                                                <MoreVertical className="h-4 w-4" />
+                                                              </Button>
+                                                            </DropdownMenuTrigger>
+                                                            <DropdownMenuContent align="end" className="w-56">
+                                                              <DropdownMenuItem
+                                                                onClick={(e) => {
+                                                                  e.stopPropagation();
+                                                                  setSelectedDocument(doc);
+                                                                  setRenameValue(doc.name);
+                                                                  setIsRenameDialogOpen(true);
+                                                                }}
+                                                                className="whitespace-nowrap cursor-pointer"
+                                                              >
+                                                                <Edit className="h-4 w-4 mr-2" />
+                                                                Renommer
+                                                              </DropdownMenuItem>
+                                                              <DropdownMenuItem
+                                                                onClick={(e) => {
+                                                                  e.stopPropagation();
+                                                                  handleDownloadDocument(doc);
+                                                                }}
+                                                                className="whitespace-nowrap cursor-pointer"
+                                                              >
+                                                                <Download className="h-4 w-4 mr-2" />
+                                                                Télécharger
+                                                              </DropdownMenuItem>
+                                                              <DropdownMenuItem
+                                                                onClick={(e) => {
+                                                                  e.stopPropagation();
+                                                                  setSelectedDocument(doc);
+                                                                  setIsPreviewDialogOpen(true);
+                                                                }}
+                                                                className="whitespace-nowrap cursor-pointer"
+                                                              >
+                                                                <Eye className="h-4 w-4 mr-2" />
+                                                                Prévisualiser
+                                                              </DropdownMenuItem>
+                                                              <DropdownMenuItem
+                                                                onClick={(e) => {
+                                                                  e.stopPropagation();
+                                                                  setSelectedDocument(doc);
+                                                                  setIsShareDialogOpen(true);
+                                                                }}
+                                                                className="whitespace-nowrap cursor-pointer"
+                                                              >
+                                                                <Share2 className="h-4 w-4 mr-2" />
+                                                                Partager
+                                                              </DropdownMenuItem>
+                                                              <DropdownMenuItem
+                                                                onClick={(e) => {
+                                                                  e.stopPropagation();
+                                                                  handleDeleteDocument(doc);
+                                                                }}
+                                                                className="text-red-600 whitespace-nowrap cursor-pointer"
+                                                              >
+                                                                <Trash2 className="h-4 w-4 mr-2" />
+                                                                Supprimer
+                                                              </DropdownMenuItem>
+                                                            </DropdownMenuContent>
+                                                          </DropdownMenu>
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  )}
+                                                </div>
+                                              );
+                                            })}
+
+                                            {/* Level 4 Documents */}
+                                            {subSubfolderDocs.map((doc) => (
+                                              <div key={doc.id} className="flex items-center gap-3 p-4 pl-12 hover:bg-gray-100 transition-colors border-t border-gray-100">
+                                                <FileText className="h-5 w-5 text-gray-400 flex-shrink-0" />
+                                                <div className="flex-1 min-w-0">
+                                                  <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
+                                                  <p className="text-sm text-gray-500">
+                                                    {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                                                  </p>
+                                                </div>
+                                                {/* Document Actions */}
+                                                <DropdownMenu>
+                                                  <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                                                      <MoreVertical className="h-4 w-4" />
+                                                    </Button>
+                                                  </DropdownMenuTrigger>
+                                                  <DropdownMenuContent align="end" className="w-56">
+                                                    <DropdownMenuItem
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedDocument(doc);
+                                                        setRenameValue(doc.name);
+                                                        setIsRenameDialogOpen(true);
+                                                      }}
+                                                      className="whitespace-nowrap cursor-pointer"
+                                                    >
+                                                      <Edit className="h-4 w-4 mr-2" />
+                                                      Renommer
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDownload(doc);
+                                                      }}
+                                                      className="whitespace-nowrap cursor-pointer"
+                                                    >
+                                                      <Download className="h-4 w-4 mr-2" />
+                                                      Télécharger
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedDocument(doc);
+                                                        setIsPreviewDialogOpen(true);
+                                                      }}
+                                                      className="whitespace-nowrap cursor-pointer"
+                                                    >
+                                                      <Eye className="h-4 w-4 mr-2" />
+                                                      Prévisualiser
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedDocument(doc);
+                                                        setIsShareDialogOpen(true);
+                                                      }}
+                                                      className="whitespace-nowrap cursor-pointer"
+                                                    >
+                                                      <Share2 className="h-4 w-4 mr-2" />
+                                                      Partager
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDeleteDocument(doc);
+                                                      }}
+                                                      className="text-red-600 whitespace-nowrap cursor-pointer"
+                                                    >
+                                                      <Trash2 className="h-4 w-4 mr-2" />
+                                                      Supprimer
+                                                    </DropdownMenuItem>
+                                                  </DropdownMenuContent>
+                                                </DropdownMenu>
+                                              </div>
+                                            ))}
+
+                                            {subSubfolderDocs.length === 0 && subSubSubfolders.length === 0 && (
+                                              <div className="p-4 pl-12 text-sm text-gray-500 italic">
+                                                Dossier vide
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+
+                                  {/* Documents in Subfolder */}
+                                  {subfolderDocs.map((doc) => (
+                                    <div key={doc.id} className="flex items-center gap-3 p-4 pl-16 hover:bg-gray-100 transition-colors bg-gray-50/50 border-t border-gray-100">
+                                      <FileText className="h-5 w-5 text-gray-500 flex-shrink-0" />
+                                      <div className="flex-1 min-w-0">
+                                        <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
+                                        <p className="text-sm text-gray-500">
+                                          {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                                        </p>
+                                      </div>
+
+                                      {/* Document Actions */}
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
+                                            <MoreVertical className="h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-56">
+                                          <DropdownMenuItem
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setSelectedDocument(doc);
+                                              setRenameValue(doc.name);
+                                              setIsRenameDialogOpen(true);
+                                            }}
+                                            className="whitespace-nowrap cursor-pointer"
+                                          >
+                                            <Edit className="h-4 w-4 mr-2" />
+                                            Renommer
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDownload(doc);
+                                            }}
+                                            className="whitespace-nowrap cursor-pointer"
+                                          >
+                                            <Download className="h-4 w-4 mr-2" />
+                                            Télécharger
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              setSelectedDocument(doc);
+                                              setIsPreviewDialogOpen(true);
+                                            }}
+                                            className="whitespace-nowrap cursor-pointer"
+                                          >
+                                            <Eye className="h-4 w-4 mr-2" />
+                                            Prévisualiser
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleDeleteDocument(doc);
+                                            }}
+                                            className="text-red-600 whitespace-nowrap cursor-pointer"
+                                          >
+                                            <Trash2 className="h-4 w-4 mr-2" />
+                                            Supprimer
+                                          </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
+                                  ))}
+
+                                  {subfolderDocs.length === 0 && subSubfolders.length === 0 && (
+                                    <div className="p-4 pl-16 text-sm text-gray-500 italic">
+                                      Dossier vide
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+
+                  {/* Root Documents List */}
+                  {filteredDocuments.map((doc) => (
+                    <div key={doc.id} className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors">
+                      <div className="w-6" /> {/* Spacer for alignment */}
+                      <FileText className="h-5 w-5 text-gray-600 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
+                        <p className="text-sm text-gray-500">
+                          {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                        </p>
                       </div>
 
                       <DropdownMenu>
@@ -714,8 +1590,8 @@ export default function DocumentsPage() {
                           <DropdownMenuItem
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedFolder(folder);
-                              setRenameValue(folder.name);
+                              setSelectedDocument(doc);
+                              setRenameValue(doc.name);
                               setIsRenameDialogOpen(true);
                             }}
                             className="whitespace-nowrap cursor-pointer"
@@ -723,25 +1599,10 @@ export default function DocumentsPage() {
                             <Edit className="h-4 w-4 mr-2" />
                             Renommer
                           </DropdownMenuItem>
-                          {/* Admin only: Modify Number */}
-                          {['admin', 'super_admin'].includes(profile?.role || '') && (
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedFolder(folder);
-                                setNewFolderNumber(folder.folder_number || '');
-                                setIsModifyNumberDialogOpen(true);
-                              }}
-                              className="whitespace-nowrap cursor-pointer"
-                            >
-                              <Hash className="h-4 w-4 mr-2" />
-                              Modifier numéro
-                            </DropdownMenuItem>
-                          )}
                           <DropdownMenuItem
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleDownloadFolder(folder);
+                              handleDownload(doc);
                             }}
                             className="whitespace-nowrap cursor-pointer"
                           >
@@ -751,7 +1612,7 @@ export default function DocumentsPage() {
                           <DropdownMenuItem
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedFolder(folder);
+                              setSelectedDocument(doc);
                               setIsPreviewDialogOpen(true);
                             }}
                             className="whitespace-nowrap cursor-pointer"
@@ -762,7 +1623,7 @@ export default function DocumentsPage() {
                           <DropdownMenuItem
                             onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedFolder(folder);
+                              setSelectedDocument(doc);
                               setIsShareDialogOpen(true);
                             }}
                             className="whitespace-nowrap cursor-pointer"
@@ -773,18 +1634,7 @@ export default function DocumentsPage() {
                           <DropdownMenuItem
                             onClick={(e) => {
                               e.stopPropagation();
-                              setParentFolder(folder);
-                              setIsNewSubFolderDialogOpen(true);
-                            }}
-                            className="whitespace-nowrap cursor-pointer"
-                          >
-                            <FolderPlus className="h-4 w-4 mr-2" />
-                            Nouveau sous-dossier
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteFolder(folder);
+                              handleDeleteDocument(doc);
                             }}
                             className="text-red-600 whitespace-nowrap cursor-pointer"
                           >
@@ -794,260 +1644,22 @@ export default function DocumentsPage() {
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-
-                    {/* Folder Documents (when expanded) */}
-                    {isExpanded && folderDocs.length > 0 && (
-                      <div className="bg-gray-50 border-t border-gray-100">
-                        {folderDocs.map((doc) => (
-                          <div key={doc.id} className="flex items-center gap-3 p-4 pl-16 hover:bg-gray-100 transition-colors">
-                            <FileText className="h-5 w-5 text-gray-600 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
-                              <p className="text-sm text-gray-500">
-                                {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                              </p>
-                            </div>
-
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                  <MoreVertical className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-56">
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedDocument(doc);
-                                    setRenameValue(doc.name);
-                                    setIsRenameDialogOpen(true);
-                                  }}
-                                  className="whitespace-nowrap cursor-pointer"
-                                >
-                                  <Edit className="h-4 w-4 mr-2" />
-                                  Renommer
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDownload(doc);
-                                  }}
-                                  className="whitespace-nowrap cursor-pointer"
-                                >
-                                  <Download className="h-4 w-4 mr-2" />
-                                  Télécharger
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedDocument(doc);
-                                    setIsPreviewDialogOpen(true);
-                                  }}
-                                  className="whitespace-nowrap cursor-pointer"
-                                >
-                                  <Eye className="h-4 w-4 mr-2" />
-                                  Prévisualiser
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedDocument(doc);
-                                    setIsShareDialogOpen(true);
-                                  }}
-                                  className="whitespace-nowrap cursor-pointer"
-                                >
-                                  <Share2 className="h-4 w-4 mr-2" />
-                                  Partager
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeleteDocument(doc);
-                                  }}
-                                  className="text-red-600 whitespace-nowrap cursor-pointer"
-                                >
-                                  <Trash2 className="h-4 w-4 mr-2" />
-                                  Supprimer
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Subfolders (when expanded) */}
-                    {isExpanded && getSubFolders(folder.id).map((subfolder) => (
-                      <div key={subfolder.id} className="bg-gray-50 border-t border-gray-100">
-                        <div className="flex items-center gap-3 p-4 pl-16 hover:bg-gray-100 transition-colors">
-                          <Folder className="h-5 w-5 text-blue-500 flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              {subfolder.folder_number && (
-                                <span className="text-xs font-mono bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded">
-                                  {subfolder.folder_number}
-                                </span>
-                              )}
-                              <h4 className="font-medium text-gray-900 truncate">{subfolder.name}</h4>
-                            </div>
-                            <p className="text-sm text-gray-500">
-                              {format(new Date(subfolder.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                            </p>
-                          </div>
-                          {subfolder.status && (
-                            <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 text-xs">
-                              {subfolder.status}
-                            </Badge>
-                          )}
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56">
-                              {/* Subfolder actions similar to folder actions */}
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedFolder(subfolder);
-                                  setRenameValue(subfolder.name);
-                                  setIsRenameDialogOpen(true);
-                                }}
-                                className="whitespace-nowrap cursor-pointer"
-                              >
-                                <Edit className="h-4 w-4 mr-2" />
-                                Renommer
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDownloadFolder(subfolder);
-                                }}
-                                className="whitespace-nowrap cursor-pointer"
-                              >
-                                <Download className="h-4 w-4 mr-2" />
-                                Télécharger
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedFolder(subfolder);
-                                  setIsPreviewDialogOpen(true);
-                                }}
-                                className="whitespace-nowrap cursor-pointer"
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                Prévisualiser
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedFolder(subfolder);
-                                  setIsShareDialogOpen(true);
-                                }}
-                                className="whitespace-nowrap cursor-pointer"
-                              >
-                                <Share2 className="h-4 w-4 mr-2" />
-                                Partager
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteFolder(subfolder);
-                                }}
-                                className="text-red-600 whitespace-nowrap cursor-pointer"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Supprimer
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-
-              {/* Root Documents List */}
-              {filteredDocuments.map((doc) => (
-                <div key={doc.id} className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors">
-                  <div className="w-6" /> {/* Spacer for alignment */}
-                  <FileText className="h-5 w-5 text-gray-600 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
-                    <p className="text-sm text-gray-500">
-                      {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                    </p>
-                  </div>
-
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56">
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDocument(doc);
-                          setRenameValue(doc.name);
-                          setIsRenameDialogOpen(true);
-                        }}
-                        className="whitespace-nowrap cursor-pointer"
-                      >
-                        <Edit className="h-4 w-4 mr-2" />
-                        Renommer
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDownload(doc);
-                        }}
-                        className="whitespace-nowrap cursor-pointer"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Télécharger
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDocument(doc);
-                          setIsPreviewDialogOpen(true);
-                        }}
-                        className="whitespace-nowrap cursor-pointer"
-                      >
-                        <Eye className="h-4 w-4 mr-2" />
-                        Prévisualiser
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDocument(doc);
-                          setIsShareDialogOpen(true);
-                        }}
-                        className="whitespace-nowrap cursor-pointer"
-                      >
-                        <Share2 className="h-4 w-4 mr-2" />
-                        Partager
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDocument(doc);
-                        }}
-                        className="text-red-600 whitespace-nowrap cursor-pointer"
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Supprimer
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </SortableContext>
+              <DragOverlay>
+                {activeDragId ? (
+                  <div className="bg-white p-4 rounded shadow-lg border border-blue-200 opacity-80">
+                    <div className="flex items-center gap-3">
+                      <Folder className="h-5 w-5 text-blue-600" />
+                      <span className="font-medium text-gray-900">
+                        {folders.find(f => f.id === activeDragId)?.name}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
           ) : (
             <div className={`grid gap-6 p-6 ${viewMode === 'very-large' ? 'grid-cols-2 lg:grid-cols-3' : 'grid-cols-3 lg:grid-cols-4'}`}>
               {/* Folders Grid */}
@@ -1527,9 +2139,11 @@ export default function DocumentsPage() {
               <Trash2 className="h-5 w-5 mr-2" />
               Confirmer la suppression
             </DialogTitle>
-            <DialogDescription>
-              Êtes-vous sûr de vouloir supprimer {itemToDelete?.type === 'folder' ? 'le dossier' : 'le document'} "<strong>{itemToDelete?.name}</strong>" ?
+            <DialogDescription className="break-words">
+              Êtes-vous sûr de vouloir supprimer {itemToDelete?.type === 'folder' ? 'le dossier' : 'le document'}{' '}
+              <strong className="break-all">"{itemToDelete?.name}"</strong> ?
               {itemToDelete?.type === 'folder' && " Tout son contenu sera également supprimé."}
+              <br />
               <br />
               Cette action est irréversible.
             </DialogDescription>

@@ -6,15 +6,28 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Upload, FileText, Folder, X } from 'lucide-react';
+import { Upload, FileText, Folder, X, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/lib/parse-auth';
 import { FolderHelpers, DocumentHelpers, FileHelpers } from '@/lib/parse-helpers';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
+import { sanitizeFilenames, needsSanitization, validateFilename } from '@/lib/filename-utils';
 
 interface FolderOption {
   id: string;
   name: string;
+}
+
+type FileStatus = 'pending' | 'uploading' | 'success' | 'error';
+
+interface FileUploadState {
+  file: File;
+  originalName: string;
+  sanitizedName: string;
+  renamed: boolean;
+  status: FileStatus;
+  error?: string;
+  progress: number;
 }
 
 export default function UploadPage() {
@@ -23,16 +36,15 @@ export default function UploadPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [fileStates, setFileStates] = useState<FileUploadState[]>([]);
   const [category, setCategory] = useState<string | undefined>(undefined);
   const [destinationFolder, setDestinationFolder] = useState<string | undefined>(undefined);
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [currentFile, setCurrentFile] = useState('');
   const [folders, setFolders] = useState<FolderOption[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const [showRenamedWarning, setShowRenamedWarning] = useState(false);
 
   useEffect(() => {
     if (profile) {
@@ -57,22 +69,55 @@ export default function UploadPage() {
     folderInputRef.current?.click();
   };
 
+  const processFiles = (files: File[]) => {
+    const newFileStates: FileUploadState[] = files.map((file) => {
+      const { valid, errors } = validateFilename(file.name);
+
+      return {
+        file,
+        originalName: file.name,
+        sanitizedName: file.name, // Keep original name by default
+        renamed: false,
+        status: valid ? 'pending' : 'error',
+        error: valid ? undefined : errors.join(', '),
+        progress: 0
+      };
+    });
+
+    setFileStates(prev => [...prev, ...newFileStates]);
+  };
+
+  const handleRename = (index: number, newName: string) => {
+    const { valid, errors } = validateFilename(newName);
+
+    setFileStates(prev => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        sanitizedName: newName,
+        status: valid ? 'pending' : 'error',
+        error: valid ? undefined : errors.join(', ')
+      };
+      return updated;
+    });
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const newFiles = Array.from(e.target.files);
-      setSelectedFiles(prev => [...prev, ...newFiles]);
+      processFiles(newFiles);
     }
   };
 
   const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
       const newFiles = Array.from(e.target.files);
-      setSelectedFiles(prev => [...prev, ...newFiles]);
+      processFiles(newFiles);
     }
   };
 
   const removeFile = (index: number) => {
-    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+    setFileStates(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -91,12 +136,79 @@ export default function UploadPage() {
 
     if (e.dataTransfer.files) {
       const newFiles = Array.from(e.dataTransfer.files);
-      setSelectedFiles(prev => [...prev, ...newFiles]);
+      processFiles(newFiles);
+    }
+  };
+
+  const uploadSingleFile = async (fileState: FileUploadState, index: number): Promise<void> => {
+    try {
+      // Update status to uploading
+      setFileStates(prev => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], status: 'uploading', progress: 10 };
+        return updated;
+      });
+
+      // Check file size
+      const fileSizeInMB = fileState.file.size / (1024 * 1024);
+      if (fileSizeInMB > 50) {
+        throw new Error('Le fichier dépasse la taille limite de 50MB');
+      }
+
+      // Upload file to Parse
+      // We use uploadFile which handles the Parse.File creation and saving
+      // It also calls sanitizeFilename internally, but we've relaxed it to be permissive
+      setFileStates(prev => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], progress: 30 };
+        return updated;
+      });
+
+      const parseFile = await FileHelpers.uploadFile(fileState.file, fileState.sanitizedName);
+      const fileUrl = FileHelpers.getFileUrl(parseFile);
+
+      setFileStates(prev => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], progress: 70 };
+        return updated;
+      });
+
+      // Create document record
+      await DocumentHelpers.create({
+        name: fileState.sanitizedName,
+        description: description || null,
+        file_path: fileUrl,
+        file_size: fileState.file.size,
+        file_type: fileState.file.type,
+        folder_id: destinationFolder || null,
+        category: category,
+        uploaded_by: profile?.id,
+        tags: tags ? tags.split(',').map(t => t.trim()) : [],
+      });
+
+      // Update status to success
+      setFileStates(prev => {
+        const updated = [...prev];
+        updated[index] = { ...updated[index], status: 'success', progress: 100 };
+        return updated;
+      });
+
+    } catch (error: any) {
+      console.error('Error uploading file:', error);
+      setFileStates(prev => {
+        const updated = [...prev];
+        updated[index] = {
+          ...updated[index],
+          status: 'error',
+          error: error.message || 'Erreur lors de l\'upload'
+        };
+        return updated;
+      });
     }
   };
 
   const handleUpload = async () => {
-    if (selectedFiles.length === 0) {
+    if (fileStates.length === 0) {
       toast.error('Veuillez sélectionner au moins un fichier');
       return;
     }
@@ -107,82 +219,85 @@ export default function UploadPage() {
     }
 
     setUploading(true);
-    setUploadProgress(0);
 
-    try {
-      const totalFiles = selectedFiles.length;
-      let uploadedCount = 0;
+    // Filter pending files
+    const pendingFiles = fileStates.map((fs, index) => ({ fs, index }))
+      .filter(({ fs }) => fs.status === 'pending');
 
-      for (const file of selectedFiles) {
-        setCurrentFile(file.name);
+    if (pendingFiles.length === 0) {
+      toast.error('Aucun fichier en attente');
+      setUploading(false);
+      return;
+    }
 
-        const fileSizeInMB = file.size / (1024 * 1024);
-        if (fileSizeInMB > 50) {
-          toast.error(`Le fichier ${file.name} dépasse 50MB`);
-          uploadedCount++;
-          setUploadProgress(Math.round((uploadedCount / totalFiles) * 100));
-          continue;
-        }
+    // Process files sequentially to avoid overwhelming the server
+    for (const { fs, index } of pendingFiles) {
+      await uploadSingleFile(fs, index);
+    }
 
-        // Upload file to Parse
-        const parseFile = await FileHelpers.uploadFile(file);
-        const fileUrl = FileHelpers.getFileUrl(parseFile);
+    setUploading(false);
 
-        // Create document record
-        await DocumentHelpers.create({
-          name: file.name,
-          description: description || null,
-          file_path: fileUrl, // Store URL or Parse File object depending on schema
-          file_size: file.size,
-          file_type: file.type,
-          folder_id: destinationFolder || null,
-          category: category,
-          uploaded_by: profile?.id,
-          tags: tags ? tags.split(',').map(t => t.trim()) : [],
-        });
+    const successCountAfterUpload = fileStates.filter(fs => fs.status === 'success').length;
+    const errorCountAfterUpload = fileStates.filter(fs => fs.status === 'error').length;
 
-        uploadedCount++;
-        setUploadProgress(Math.round((uploadedCount / totalFiles) * 100));
-      }
-
+    if (errorCountAfterUpload === 0) {
       toast.success(
-        `✅ Téléchargement terminé avec succès`,
+        `✅ Upload terminé avec succès`,
         {
-          description: `${selectedFiles.length} fichier(s) ont été ajoutés.`,
+          description: `${successCountAfterUpload} fichier(s) uploadé(s).`,
           duration: 5000
         }
       );
-
-      setSelectedFiles([]);
-      setCategory(undefined);
-      setDestinationFolder(undefined);
-      setDescription('');
-      setTags('');
-
       setTimeout(() => {
-        setUploadProgress(0);
-        setCurrentFile('');
         router.push('/dashboard/documents');
       }, 2000);
-    } catch (error: any) {
-      console.error('Erreur upload:', error);
+    } else if (successCountAfterUpload === 0) {
       toast.error(
-        `⚠️ Erreur : le téléchargement n'a pas pu être terminé`,
+        `❌ Échec de l'upload`,
         {
-          description: error.message || 'Erreur inconnue',
+          description: `${errorCountAfterUpload} fichier(s) ont échoué. Vérifiez les erreurs ci-dessous.`,
           duration: 6000
         }
       );
-    } finally {
-      setTimeout(() => {
-        setUploading(false);
-      }, 2000);
+    } else {
+      toast.warning(
+        `⚠️ Upload partiel`,
+        {
+          description: `${successCountAfterUpload} réussi(s), ${errorCountAfterUpload} échoué(s). Vous pouvez relancer les fichiers échoués.`,
+          duration: 6000
+        }
+      );
     }
+  };
+
+  const retryFailedFiles = async () => {
+    // Reset failed files to pending
+    setFileStates(prev =>
+      prev.map(fs =>
+        fs.status === 'error' && !fs.error?.includes('interdits') // Don't retry validation errors without rename
+          ? { ...fs, status: 'pending' as FileStatus, error: undefined, progress: 0 }
+          : fs
+      )
+    );
+
+    // Trigger upload
+    await handleUpload();
   };
 
   const handleCancel = () => {
     router.push('/dashboard/documents');
   };
+
+  const totalFiles = fileStates.length;
+  const successCount = fileStates.filter(fs => fs.status === 'success').length;
+  const errorCount = fileStates.filter(fs => fs.status === 'error').length;
+  const pendingCount = fileStates.filter(fs => fs.status === 'pending').length;
+  const uploadingCount = fileStates.filter(fs => fs.status === 'uploading').length;
+  // const renamedCount = fileStates.filter(fs => fs.renamed).length; // No longer used
+
+  const overallProgress = totalFiles > 0
+    ? Math.round((successCount / totalFiles) * 100)
+    : 0;
 
   return (
     <div className="space-y-6 p-6 max-w-7xl mx-auto">
@@ -224,6 +339,7 @@ export default function UploadPage() {
                   variant="outline"
                   onClick={handleFileSelect}
                   className="gap-2"
+                  disabled={uploading}
                 >
                   <FileText className="w-4 h-4" />
                   Sélectionner des fichiers
@@ -233,6 +349,7 @@ export default function UploadPage() {
                   variant="outline"
                   onClick={handleFolderSelect}
                   className="gap-2"
+                  disabled={uploading}
                 >
                   <Folder className="w-4 h-4" />
                   Sélectionner un dossier
@@ -258,61 +375,129 @@ export default function UploadPage() {
             </div>
           </div>
 
-          {selectedFiles.length > 0 && (
+          {/* File list */}
+          {fileStates.length > 0 && (
             <div className="mt-4 space-y-2">
-              <p className="text-sm font-medium text-gray-700">
-                {selectedFiles.length} fichier(s) sélectionné(s)
-              </p>
-              <div className="space-y-1 max-h-40 overflow-y-auto">
-                {selectedFiles.map((file, index) => (
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-gray-700">
+                  {totalFiles} fichier(s) • {successCount} réussi(s) • {errorCount} échoué(s)
+                </p>
+                {errorCount > 0 && !uploading && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={retryFailedFiles}
+                    className="gap-2"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    Relancer les fichiers échoués
+                  </Button>
+                )}
+              </div>
+
+              <div className="space-y-1 max-h-96 overflow-y-auto">
+                {fileStates.map((fileState, index) => (
                   <div
                     key={index}
-                    className="flex items-center justify-between bg-white border rounded-md px-3 py-2 text-sm"
+                    className={`flex items-center justify-between border rounded-md px-3 py-2 text-sm ${fileState.status === 'success' ? 'bg-green-50 border-green-200' :
+                      fileState.status === 'error' ? 'bg-red-50 border-red-200' :
+                        fileState.status === 'uploading' ? 'bg-blue-50 border-blue-200' :
+                          'bg-white'
+                      }`}
                   >
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                      <span className="truncate">{file.name}</span>
-                      <span className="text-xs text-gray-400 flex-shrink-0">
-                        ({(file.size / 1024).toFixed(1)} KB)
-                      </span>
+                      {fileState.status === 'success' && (
+                        <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                      )}
+                      {fileState.status === 'error' && (
+                        <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+                      )}
+                      {fileState.status === 'uploading' && (
+                        <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                      )}
+                      {fileState.status === 'pending' && (
+                        <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                      )}
+
+                      <div className="flex-1 min-w-0">
+                        {fileState.status === 'error' && fileState.error?.includes('interdits') ? (
+                          <div className="flex items-center gap-2">
+                            <Input
+                              value={fileState.sanitizedName}
+                              onChange={(e) => handleRename(index, e.target.value)}
+                              className="h-7 text-sm py-0 px-2 w-full max-w-md border-red-300 focus:border-red-500"
+                            />
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-xs"
+                              onClick={() => handleRename(index, fileState.sanitizedName)} // Re-validate
+                            >
+                              Valider
+                            </Button>
+                          </div>
+                        ) : (
+                          <p className={`truncate font-medium ${fileState.status === 'error' ? 'text-red-700' : 'text-gray-700'}`}>
+                            {fileState.sanitizedName}
+                          </p>
+                        )}
+
+                        {fileState.status === 'error' && (
+                          <p className="text-xs text-red-600 mt-0.5">
+                            {fileState.error}
+                          </p>
+                        )}
+                        {fileState.status === 'uploading' && (
+                          <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1.5">
+                            <div
+                              className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                              style={{ width: `${fileState.progress}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => removeFile(index)}
-                      className="h-6 w-6 p-0 flex-shrink-0"
-                      disabled={uploading}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
+
+                    <div className="flex items-center gap-3 ml-4">
+                      <span className="text-xs text-gray-500 whitespace-nowrap">
+                        {(fileState.file.size / 1024).toFixed(1)} KB
+                      </span>
+                      {!uploading && fileState.status !== 'success' && (
+                        <button
+                          onClick={() => removeFile(index)}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
+          {/* Overall progress */}
           {uploading && (
             <div className="mt-6 space-y-3 bg-blue-50 border-2 border-blue-200 rounded-lg p-5">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
                   <p className="text-sm font-semibold text-blue-900">
-                    Téléchargement en cours...
+                    Upload en cours...
                   </p>
-                  {currentFile && (
-                    <p className="text-xs text-blue-700 truncate max-w-md">
-                      {currentFile}
-                    </p>
-                  )}
+                  <p className="text-xs text-blue-700">
+                    {successCount} / {totalFiles} fichiers uploadés
+                  </p>
                 </div>
                 <span className="text-2xl font-bold text-blue-600">
-                  {uploadProgress}%
+                  {overallProgress}%
                 </span>
               </div>
               <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
                 <div
                   className="h-full bg-blue-600 transition-all duration-300 ease-out rounded-full"
-                  style={{ width: `${uploadProgress}%` }}
+                  style={{ width: `${overallProgress}%` }}
                 />
               </div>
             </div>
@@ -409,13 +594,13 @@ export default function UploadPage() {
           <Button
             type="button"
             onClick={handleUpload}
-            disabled={uploading || selectedFiles.length === 0 || !category}
+            disabled={uploading || fileStates.length === 0 || !category || pendingCount === 0}
             className="h-11 px-6 bg-green-600 hover:bg-green-700 gap-2 w-full sm:w-auto"
           >
             <Upload className="w-4 h-4" />
             {uploading
               ? 'Upload en cours...'
-              : `Uploader ${selectedFiles.length} document(s)`
+              : `Uploader ${pendingCount} document(s)`
             }
           </Button>
         </div>

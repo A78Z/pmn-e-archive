@@ -47,8 +47,14 @@ export function NotificationsBell() {
       const data = await NotificationHelpers.getByUser(user.id, 10);
       setNotifications(data as Notification[]);
       setUnreadCount(data.filter((n: any) => !n.is_read).length);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching notifications:', error);
+
+      // If session is invalid, redirect to login
+      if (error.code === 209 || error.message?.includes('Invalid session token')) {
+        console.warn('Session expired, redirecting to login');
+        window.location.href = '/login';
+      }
     }
   };
 

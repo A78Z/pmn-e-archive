@@ -628,13 +628,26 @@ export default function AdministrationPage() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-bold">Gestion des Utilisateurs</h2>
-          <Button
-            onClick={() => setInviteDialogOpen(true)}
-            className="bg-green-600 hover:bg-green-700 text-white"
-          >
-            <UserPlus className="h-4 w-4 mr-2" />
-            Inviter un utilisateur
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => {
+                fetchData();
+                toast.success('Liste des utilisateurs actualisée');
+              }}
+              variant="outline"
+              className="border-blue-600 text-blue-600 hover:bg-blue-50"
+            >
+              <Activity className="h-4 w-4 mr-2" />
+              Actualiser
+            </Button>
+            <Button
+              onClick={() => setInviteDialogOpen(true)}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              <UserPlus className="h-4 w-4 mr-2" />
+              Inviter un utilisateur
+            </Button>
+          </div>
         </div>
 
         <Card className="border shadow-sm">

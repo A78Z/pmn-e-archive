@@ -160,6 +160,46 @@ export const FolderHelpers = {
             throw error; // Re-throw other errors
         }
     },
+
+    async move(folderId: string, newParentId: string | null) {
+        const query = new Parse.Query(ParseClasses.FOLDER);
+        const folder = await query.get(folderId);
+
+        // Cycle detection
+        if (newParentId) {
+            if (folderId === newParentId) {
+                throw new Error("Impossible de déplacer un dossier dans lui-même");
+            }
+
+            // Check if newParentId is a descendant of folderId
+            // Traverse up from newParentId. If we hit folderId, it's a cycle.
+            let currentId: string | null = newParentId;
+            // Limit depth to prevent infinite loops in case of existing cycles
+            let depth = 0;
+            const maxDepth = 50;
+
+            while (currentId && depth < maxDepth) {
+                // Optimization: If we have all folders in memory we could check there,
+                // but here we must query safely.
+                const parentQuery = new Parse.Query(ParseClasses.FOLDER);
+                try {
+                    const parent: Parse.Object = await parentQuery.get(currentId);
+                    if (parent.id === folderId) {
+                        throw new Error("Impossible de déplacer un dossier dans un de ses sous-dossiers");
+                    }
+                    currentId = parent.get('parent_id');
+                    depth++;
+                } catch (e) {
+                    // Parent not found or other error, stop checking
+                    break;
+                }
+            }
+        }
+
+        folder.set('parent_id', newParentId);
+        const result = await folder.save();
+        return parseObjectToJSON(result);
+    },
 };
 
 // User helpers
@@ -427,12 +467,35 @@ export const AccessRequestHelpers = {
 // Notification helpers
 export const NotificationHelpers = {
     async getByUser(userId: string, limit = 10) {
-        const query = new Parse.Query(ParseClasses.USER_NOTIFICATION);
-        query.equalTo('user_id', userId);
-        query.descending('createdAt');
-        query.limit(limit);
-        const results = await query.find();
-        return results.map(parseObjectToJSON);
+        try {
+            // Check if user is authenticated
+            const currentUser = Parse.User.current();
+            if (!currentUser) {
+                console.warn('No authenticated user, skipping notifications fetch');
+                return [];
+            }
+
+            const query = new Parse.Query(ParseClasses.USER_NOTIFICATION);
+            query.equalTo('user_id', userId);
+            query.descending('createdAt');
+            query.limit(limit);
+            const results = await query.find();
+            return results.map(parseObjectToJSON);
+        } catch (error: any) {
+            // Handle invalid session token gracefully
+            if (error.code === 209 || error.message?.includes('Invalid session token')) {
+                console.warn('Invalid session token, user needs to re-login');
+                // Optionally log out the user
+                try {
+                    await Parse.User.logOut();
+                } catch (logoutError) {
+                    console.error('Error logging out:', logoutError);
+                }
+                return [];
+            }
+            console.error('Error fetching notifications:', error);
+            return [];
+        }
     },
 
     async create(data: any) {
@@ -472,10 +535,57 @@ export const NotificationHelpers = {
 // File upload helper
 export const FileHelpers = {
     async uploadFile(file: File, fileName?: string): Promise<Parse.File> {
-        const name = fileName || file.name;
-        const parseFile = new Parse.File(name, file);
-        await parseFile.save();
-        return parseFile;
+        try {
+            // Import sanitization function dynamically to avoid circular dependencies
+            const { sanitizeFilename } = await import('./filename-utils');
+
+            const originalName = fileName || file.name;
+            const sanitizedName = sanitizeFilename(originalName);
+
+            // Create Parse File with sanitized name
+            const parseFile = new Parse.File(sanitizedName, file);
+
+            // Attempt to save with retry logic
+            let lastError: any;
+            const MAX_RETRIES = 2;
+
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+                try {
+                    await parseFile.save();
+                    return parseFile;
+                } catch (error: any) {
+                    lastError = error;
+                    console.error(`Upload attempt ${attempt} failed:`, error);
+
+                    // Don't retry on validation errors
+                    if (error.code === Parse.Error.VALIDATION_ERROR) {
+                        break;
+                    }
+
+                    // Wait before retry (exponential backoff)
+                    if (attempt < MAX_RETRIES) {
+                        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                    }
+                }
+            }
+
+            // All retries failed, throw with French error message
+            throw new Error(
+                lastError?.message ||
+                "Échec de l'upload du fichier. Veuillez réessayer."
+            );
+        } catch (error: any) {
+            // Translate common Parse errors to French
+            if (error.code === Parse.Error.FILE_SAVE_ERROR) {
+                throw new Error("Erreur lors de la sauvegarde du fichier. Vérifiez votre connexion.");
+            } else if (error.code === Parse.Error.VALIDATION_ERROR) {
+                throw new Error("Le nom de fichier contient des caractères invalides.");
+            } else if (error.code === Parse.Error.CONNECTION_FAILED) {
+                throw new Error("Connexion au serveur échouée. Vérifiez votre connexion internet.");
+            }
+
+            throw error;
+        }
     },
 
     async deleteFile(fileUrl: string) {
