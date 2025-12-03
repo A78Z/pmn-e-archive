@@ -533,6 +533,9 @@ export default function DocumentsPage() {
       setItemToDelete(null);
       fetchFolders();
       fetchDocuments();
+
+      // Trigger dashboard refresh to update stats in real-time
+      window.dispatchEvent(new Event('refreshDashboard'));
     } catch (error) {
       console.error('Error deleting item:', error);
       toast.error('Erreur lors de la suppression');
@@ -1350,7 +1353,7 @@ export default function DocumentsPage() {
                                                               <DropdownMenuItem
                                                                 onClick={(e) => {
                                                                   e.stopPropagation();
-                                                                  handleDownloadDocument(doc);
+                                                                  handleDownload(doc);
                                                                 }}
                                                                 className="whitespace-nowrap cursor-pointer"
                                                               >

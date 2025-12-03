@@ -308,3 +308,135 @@ Parse.Cloud.define('testFilenameSanitization', async (request) => {
 });
 
 console.log('Cloud Code loaded: Filename validation and upload functions ready');
+
+// ============================================================================
+// User Management Cloud Functions
+// ============================================================================
+
+/**
+ * Cloud Function: Get All Users
+ * Fetches all users with Master Key access (admin only)
+ */
+Parse.Cloud.define('getAllUsers', async (request) => {
+    const { user } = request;
+
+    // Check if user is authenticated and is super_admin or admin
+    if (!user) {
+        throw new Parse.Error(Parse.Error.INVALID_SESSION_TOKEN, 'User must be authenticated');
+    }
+
+    const role = user.get('role');
+    if (role !== 'super_admin' && role !== 'admin') {
+        throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN, 'Only admins can view all users');
+    }
+
+    // Use Master Key to fetch all users
+    const query = new Parse.Query(Parse.User);
+    query.descending('createdAt');
+    query.limit(1000);
+
+    const results = await query.find({ useMasterKey: true });
+
+    // Return user data
+    return results.map(u => ({
+        id: u.id,
+        email: u.get('email'),
+        username: u.get('username'),
+        full_name: u.get('full_name'),
+        role: u.get('role'),
+        fonction: u.get('fonction'),
+        is_verified: u.get('is_verified'),
+        is_active: u.get('is_active'),
+        assigned_zone: u.get('assigned_zone'),
+        department: u.get('department'),
+        createdAt: u.get('createdAt'),
+        updatedAt: u.get('updatedAt'),
+        last_login: u.get('last_login')
+    }));
+});
+
+/**
+ * Cloud Function: Verify User
+ * Approve or reject a user account (admin only)
+ */
+Parse.Cloud.define('verifyUser', async (request) => {
+    const { user, params } = request;
+    const { userId, approved, notes } = params;
+
+    // Check if user is authenticated and is admin
+    if (!user) {
+        throw new Parse.Error(Parse.Error.INVALID_SESSION_TOKEN, 'User must be authenticated');
+    }
+
+    const role = user.get('role');
+    if (role !== 'super_admin' && role !== 'admin') {
+        throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN, 'Only admins can verify users');
+    }
+
+    // Get the user to verify
+    const query = new Parse.Query(Parse.User);
+    const targetUser = await query.get(userId, { useMasterKey: true });
+
+    if (!targetUser) {
+        throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'User not found');
+    }
+
+    // Update user verification status
+    targetUser.set('is_verified', approved);
+    targetUser.set('is_active', approved);
+
+    if (notes) {
+        targetUser.set('admin_notes', notes);
+    }
+
+    await targetUser.save(null, { useMasterKey: true });
+
+    return {
+        success: true,
+        message: approved ? 'User approved successfully' : 'User rejected'
+    };
+});
+
+/**
+ * Cloud Function: Update User Role
+ * Change a user's role (super_admin only)
+ */
+Parse.Cloud.define('updateUserRole', async (request) => {
+    const { user, params } = request;
+    const { userId, newRole } = params;
+
+    // Check if user is authenticated and is super_admin
+    if (!user) {
+        throw new Parse.Error(Parse.Error.INVALID_SESSION_TOKEN, 'User must be authenticated');
+    }
+
+    const role = user.get('role');
+    if (role !== 'super_admin') {
+        throw new Parse.Error(Parse.Error.OPERATION_FORBIDDEN, 'Only super admins can change roles');
+    }
+
+    // Get the user to update
+    const query = new Parse.Query(Parse.User);
+    const targetUser = await query.get(userId, { useMasterKey: true });
+
+    if (!targetUser) {
+        throw new Parse.Error(Parse.Error.OBJECT_NOT_FOUND, 'User not found');
+    }
+
+    // Validate role
+    const validRoles = ['super_admin', 'admin', 'user', 'guest'];
+    if (!validRoles.includes(newRole)) {
+        throw new Parse.Error(Parse.Error.VALIDATION_ERROR, 'Invalid role');
+    }
+
+    // Update role
+    targetUser.set('role', newRole);
+    await targetUser.save(null, { useMasterKey: true });
+
+    return {
+        success: true,
+        message: `User role updated to ${newRole}`
+    };
+});
+
+console.log('Cloud Code loaded: User management functions ready');

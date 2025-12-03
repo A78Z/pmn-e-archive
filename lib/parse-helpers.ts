@@ -50,7 +50,23 @@ export const DocumentHelpers = {
         try {
             const query = new Parse.Query(ParseClasses.DOCUMENT);
             const document = await query.get(id);
+
+            // Delete the physical file from Back4App storage first
+            const file = document.get('file');
+            if (file && file._name) {
+                try {
+                    // Delete the file from Back4App storage
+                    await file.destroy();
+                    console.log(`File ${file._name} deleted from storage`);
+                } catch (fileError) {
+                    console.warn(`Failed to delete file ${file._name}:`, fileError);
+                    // Continue with document deletion even if file deletion fails
+                }
+            }
+
+            // Then delete the document record
             await document.destroy();
+            console.log(`Document ${id} deleted successfully`);
         } catch (error: any) {
             if (error.code === Parse.Error.OBJECT_NOT_FOUND) {
                 console.warn(`Document ${id} not found, may have been already deleted`);
@@ -207,6 +223,7 @@ export const UserHelpers = {
     async getAll() {
         const query = new Parse.Query(Parse.User);
         query.descending('createdAt');
+        query.limit(1000); // Increase limit to ensure all users are fetched
         const results = await query.find();
         return results.map(parseObjectToJSON);
     },

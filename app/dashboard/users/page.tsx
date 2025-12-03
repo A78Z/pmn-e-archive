@@ -75,7 +75,8 @@ export default function UsersManagementPage() {
 
   const fetchUsers = async () => {
     try {
-      const data = await UserHelpers.getAll();
+      // Use Cloud Function to fetch all users with Master Key
+      const data = await Parse.Cloud.run('getAllUsers');
       setUsers(data as unknown as User[]);
     } catch (error) {
       console.error('Error fetching users:', error);
