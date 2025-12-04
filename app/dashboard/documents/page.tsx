@@ -204,7 +204,21 @@ export default function DocumentsPage() {
 
   const fetchFolders = async () => {
     try {
-      const foldersData = await FolderHelpers.getAll();
+      if (!profile?.id) {
+        console.warn('No user profile available, skipping folder fetch');
+        return;
+      }
+
+      console.log('📁 Fetching folders for user:', profile.id);
+
+      // Fetch folders for current user only
+      // Admin users can see all folders if needed (future enhancement)
+      const isAdmin = ['super_admin', 'admin'].includes(profile.role);
+      const foldersData = isAdmin
+        ? await FolderHelpers.getAllForAdmin()
+        : await FolderHelpers.getAllByUser(profile.id);
+
+      console.log(`✅ Fetched ${foldersData.length} folders`);
       setFolders(foldersData as Folder[]);
     } catch (error) {
       console.error('Error loading folders:', error);
@@ -395,6 +409,8 @@ export default function DocumentsPage() {
     }
 
     const draggedFolder = folders.find(f => f.id === active.id);
+    const targetFolder = folders.find(f => f.id === over.id);
+
     if (!draggedFolder) return;
 
     // Check permissions
@@ -403,60 +419,72 @@ export default function DocumentsPage() {
       return;
     }
 
-    // Determine if we're dropping onto a folder (reparent) or between folders (reorder)
-    // For now, we assume dropping ONTO a folder means reparenting
-    // We check if the over.id corresponds to a folder
-    const targetFolder = folders.find(f => f.id === over.id);
-
-    // Save previous state for rollback
-    const prevFolders = [...folders];
-
     try {
-      if (targetFolder) {
-        // Reparent: Move into target folder
+      // Determine if this is a REORDER or REPARENT operation
+      // REORDER: Both folders have the same parent (siblings) - just changing position
+      // REPARENT: Dropping onto a folder with different parent - moving INTO that folder
+
+      const sameParent = draggedFolder.parent_id === targetFolder?.parent_id;
+
+      if (targetFolder && !sameParent) {
+        // REPARENT: Move INTO target folder (different parent)
+        console.log(`🔄 Reparenting: Moving "${draggedFolder.name}" into "${targetFolder.name}"`);
+        console.log(`   Current parent: ${draggedFolder.parent_id || 'root'} → New parent: ${targetFolder.id}`);
+
         const newParentId = targetFolder.id;
 
-        // Optimistic UI update
-        setFolders(prev => prev.map(f =>
-          f.id === draggedFolder.id
-            ? { ...f, parent_id: newParentId }
-            : f
-        ));
+        // 1. Expand parent folder FIRST
+        setExpandedFolders(prev => {
+          const newExpanded = new Set(prev);
+          newExpanded.add(newParentId);
+          console.log('Expanded folders:', Array.from(newExpanded));
+          return newExpanded;
+        });
 
-        // API call with cycle detection
+        // 2. Make API call with cycle detection
         await FolderHelpers.move(draggedFolder.id, newParentId);
+        console.log('Folder moved successfully in database');
 
+        // 3. Refresh folders from server
+        await fetchFolders();
+        console.log('Folders refreshed from server');
+
+        // 4. Ensure parent stays expanded after refresh
+        setExpandedFolders(prev => {
+          const newExpanded = new Set(prev);
+          newExpanded.add(newParentId);
+          return newExpanded;
+        });
+
+        // 5. Show success message for REPARENTING
         toast.success(`Dossier déplacé dans "${targetFolder.name}"`);
 
-        // Expand the target folder to show the moved item
-        setExpandedFolders(prev => new Set([...prev, newParentId]));
       } else {
-        // Reorder: Change position among siblings
-        // For now, we'll just update the order in the UI
-        // Backend would need an "order" field to persist this
+        // REORDER: Just changing position among siblings (same parent)
+        console.log(`↕️ Reordering: Moving "${draggedFolder.name}" to new position`);
+        console.log(`   Parent remains: ${draggedFolder.parent_id || 'root'}`);
+
         const oldIndex = folders.findIndex(f => f.id === active.id);
         const newIndex = folders.findIndex(f => f.id === over.id);
 
         if (oldIndex !== -1 && newIndex !== -1) {
           setFolders(arrayMove(folders, oldIndex, newIndex));
-          toast.success('Ordre des dossiers mis à jour');
+          // Show success message for REORDERING
+          toast.success('Position du dossier modifiée');
         }
       }
-
-      // Refresh to ensure consistency
-      await fetchFolders();
     } catch (error: any) {
-      console.error('Error moving folder:', error);
+      console.error('Error in drag operation:', error);
 
-      // Rollback on error
-      setFolders(prevFolders);
+      // Refresh to restore correct state
+      await fetchFolders();
 
       if (error.message?.includes('sous-dossiers')) {
         toast.error('Impossible de déplacer un dossier dans un de ses sous-dossiers');
       } else if (error.message?.includes('lui-même')) {
         toast.error('Impossible de déplacer un dossier dans lui-même');
       } else {
-        toast.error('Erreur lors du déplacement du dossier');
+        toast.error('Erreur lors de l\'opération');
       }
     }
   };
@@ -658,7 +686,13 @@ export default function DocumentsPage() {
   };
 
   const getSubFolders = (parentId: string) => {
-    return folders.filter(folder => folder.parent_id === parentId);
+    const subfolders = folders.filter(folder => folder.parent_id === parentId);
+    if (subfolders.length === 0) {
+      console.log(`getSubFolders(${parentId}): No subfolders found. Total folders: ${folders.length}`);
+    } else {
+      console.log(`getSubFolders(${parentId}): Found ${subfolders.length} subfolders`);
+    }
+    return subfolders;
   };
 
   const filteredFolders = folders.filter(folder => {
@@ -1097,6 +1131,17 @@ export default function DocumentsPage() {
                                     >
                                       <Share2 className="h-4 w-4 mr-2" />
                                       Partager
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setParentFolder(subfolder);
+                                        setIsNewSubFolderDialogOpen(true);
+                                      }}
+                                      className="whitespace-nowrap cursor-pointer"
+                                    >
+                                      <FolderPlus className="h-4 w-4 mr-2" />
+                                      Nouveau sous-dossier
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                       onClick={(e) => {

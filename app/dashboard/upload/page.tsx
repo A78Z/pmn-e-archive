@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Upload, FileText, Folder, X, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/lib/parse-auth';
 import { FolderHelpers, DocumentHelpers, FileHelpers } from '@/lib/parse-helpers';
+import { Parse } from '@/lib/parse';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { sanitizeFilenames, needsSanitization, validateFilename } from '@/lib/filename-utils';
@@ -54,7 +55,15 @@ export default function UploadPage() {
 
   const fetchFolders = async () => {
     try {
-      const data = await FolderHelpers.getAll();
+      // Get current user from Parse
+      const currentUser = Parse.User.current();
+      if (!currentUser) {
+        console.warn('No authenticated user, skipping folder fetch');
+        return;
+      }
+
+      // Fetch only user's own folders
+      const data = await FolderHelpers.getAllByUser(currentUser.id);
       setFolders(data.map((f: any) => ({ id: f.id, name: f.name })));
     } catch (error) {
       console.error('Error fetching folders:', error);

@@ -99,9 +99,46 @@ export const DocumentHelpers = {
 
 // Folder helpers
 export const FolderHelpers = {
-    async getAll() {
+    /**
+     * Get all folders (optionally filtered by user)
+     * @param userId - Optional user ID to filter folders by owner
+     * @returns Array of folders
+     */
+    async getAll(userId?: string) {
+        const query = new Parse.Query(ParseClasses.FOLDER);
+
+        // Filter by user if userId provided
+        if (userId) {
+            query.equalTo('created_by', userId);
+        }
+
+        query.ascending('name');
+        const results = await query.find();
+        return results.map(parseObjectToJSON);
+    },
+
+    /**
+     * Get all folders for a specific user
+     * @param userId - User ID to fetch folders for
+     * @returns Array of user's folders
+     */
+    async getAllByUser(userId: string) {
+        const query = new Parse.Query(ParseClasses.FOLDER);
+        query.equalTo('created_by', userId);
+        query.ascending('name');
+        const results = await query.find();
+        return results.map(parseObjectToJSON);
+    },
+
+    /**
+     * Get all folders (admin only - no filtering)
+     * Requires admin/super_admin role
+     * @returns Array of all folders in system
+     */
+    async getAllForAdmin() {
         const query = new Parse.Query(ParseClasses.FOLDER);
         query.ascending('name');
+        query.limit(10000);
         const results = await query.find();
         return results.map(parseObjectToJSON);
     },
@@ -177,43 +214,73 @@ export const FolderHelpers = {
         }
     },
 
-    async move(folderId: string, newParentId: string | null) {
-        const query = new Parse.Query(ParseClasses.FOLDER);
+    // ✅ NOUVEAU - Fonction de réordonnancement séparée
+    async reorder(folderId: string, newOrder: number) {
+        console.log(`[FolderHelpers.reorder] Folder ${folderId} → order ${newOrder}`);
+
+        const Folder = Parse.Object.extend(ParseClasses.FOLDER);
+        const query = new Parse.Query(Folder);
         const folder = await query.get(folderId);
 
-        // Cycle detection
+        const currentUser = Parse.User.current();
+        const ownerId = folder.get('created_by');
+
+        // ✅ VALIDATION: Vérifier que l'utilisateur est le propriétaire
+        if (currentUser && ownerId !== currentUser.id) {
+            throw new Error('Vous n\'avez pas la permission de réorganiser ce dossier');
+        }
+
+        console.log(`[FolderHelpers.reorder] Current order: ${folder.get('order')}`);
+        console.log(`[FolderHelpers.reorder] Owner: ${ownerId}`);
+
+        // ✅ IMPORTANT: Ne modifier QUE le champ order
+        folder.set('order', newOrder);
+
+        const result = await folder.save();
+
+        console.log(`[FolderHelpers.reorder] ✅ Success! New order: ${result.get('order')}`);
+        console.log(`[FolderHelpers.reorder] Parent unchanged: ${result.get('parent_id')}`);
+        console.log(`[FolderHelpers.reorder] Owner unchanged: ${result.get('created_by')}`);
+
+        return parseObjectToJSON(result);
+    },
+
+    async move(folderId: string, newParentId: string | null) {
+        console.log(`[FolderHelpers.move] Moving folder ${folderId} to parent ${newParentId}`);
+
+        const Folder = Parse.Object.extend(ParseClasses.FOLDER);
+        const query = new Parse.Query(Folder);
+        const folder = await query.get(folderId);
+
+        console.log(`[FolderHelpers.move] Current parent_id: ${folder.get('parent_id')}`);
+        console.log(`[FolderHelpers.move] Current created_by: ${folder.get('created_by')}`);
+
+        // Prevent moving a folder into itself
+        if (folderId === newParentId) {
+            throw new Error('Impossible de déplacer un dossier dans lui-même');
+        }
+
+        // Prevent moving a folder into one of its subfolders (cycle detection)
         if (newParentId) {
-            if (folderId === newParentId) {
-                throw new Error("Impossible de déplacer un dossier dans lui-même");
-            }
+            const allFolders = await this.getAll();
+            const isDescendant = (parentId: string, targetId: string): boolean => {
+                const children = allFolders.filter((f: any) => f.parent_id === parentId);
+                if (children.some((c: any) => c.id === targetId)) return true;
+                return children.some((c: any) => isDescendant(c.id, targetId));
+            };
 
-            // Check if newParentId is a descendant of folderId
-            // Traverse up from newParentId. If we hit folderId, it's a cycle.
-            let currentId: string | null = newParentId;
-            // Limit depth to prevent infinite loops in case of existing cycles
-            let depth = 0;
-            const maxDepth = 50;
-
-            while (currentId && depth < maxDepth) {
-                // Optimization: If we have all folders in memory we could check there,
-                // but here we must query safely.
-                const parentQuery = new Parse.Query(ParseClasses.FOLDER);
-                try {
-                    const parent: Parse.Object = await parentQuery.get(currentId);
-                    if (parent.id === folderId) {
-                        throw new Error("Impossible de déplacer un dossier dans un de ses sous-dossiers");
-                    }
-                    currentId = parent.get('parent_id');
-                    depth++;
-                } catch (e) {
-                    // Parent not found or other error, stop checking
-                    break;
-                }
+            if (isDescendant(folderId, newParentId)) {
+                throw new Error('Impossible de déplacer un dossier dans un de ses sous-dossiers');
             }
         }
 
         folder.set('parent_id', newParentId);
         const result = await folder.save();
+
+        console.log(`[FolderHelpers.move] ✅ Success! New parent_id: ${result.get('parent_id')}`);
+        console.log(`[FolderHelpers.move] Folder created_by: ${result.get('created_by')}`);
+        console.log(`[FolderHelpers.move] Folder name: ${result.get('name')}`);
+
         return parseObjectToJSON(result);
     },
 };

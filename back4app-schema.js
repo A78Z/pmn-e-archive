@@ -45,8 +45,12 @@ const schemas = {
     Folder: {
         fields: {
             name: { type: 'String', required: true },
-            created_by: { type: 'String', required: true },
-            parent_id: { type: 'String' }
+            created_by: { type: 'String', required: true },  // ✅ OBLIGATOIRE - Empêche dossiers orphelins
+            parent_id: { type: 'String' },  // null = root level
+            folder_number: { type: 'String' },  // Numéro de dossier (optionnel)
+            order: { type: 'Number', defaultValue: 0 },  // ✅ NOUVEAU - Pour persister le réordonnancement
+            last_moved_at: { type: 'Date' },  // ✅ NOUVEAU - Métadonnées de traçabilité
+            last_moved_by: { type: 'String' }  // ✅ NOUVEAU - Qui a déplacé le dossier
         },
         classLevelPermissions: {
             find: { '*': true },
@@ -54,6 +58,12 @@ const schemas = {
             create: { '*': true },
             update: { '*': true },
             delete: { '*': true }
+        },
+        // ✅ NOUVEAU - Indexes pour performance
+        indexes: {
+            created_by_1: { created_by: 1 },
+            parent_id_1: { parent_id: 1 },
+            order_1: { order: 1 }
         }
     },
 
