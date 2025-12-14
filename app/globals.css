@@ -1,86 +1,97 @@
-@import "tailwindcss";
-@custom-variant dark (&:where(.dark, .dark *));
-@source "./**/*.{js,jsx,ts,tsx,mdx}";
-@source "../components/**/*.{js,jsx,ts,tsx,mdx}";
-@source "../hooks/**/*.{js,jsx,ts,tsx,mdx}";
-@source "../lib/**/*.{js,jsx,ts,tsx,mdx}";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-@theme {
-  --color-background: hsl(50 60% 97%);
-  --color-foreground: hsl(160 20% 20%);
-  --color-surface: hsl(0 0% 100%);
-  --color-surface-foreground: hsl(154 25% 18%);
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(160 20% 20%);
-  --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(160 20% 20%);
-  --color-primary: hsl(153 64% 26%);
-  --color-primary-foreground: hsl(48 100% 96%);
-  --color-secondary: hsl(48 94% 62%);
-  --color-secondary-foreground: hsl(154 40% 20%);
-  --color-muted: hsl(52 45% 92%);
-  --color-muted-foreground: hsl(152 16% 32%);
-  --color-accent: hsl(98 60% 54%);
-  --color-accent-foreground: hsl(158 34% 18%);
-  --color-destructive: hsl(8 70% 54%);
-  --color-destructive-foreground: hsl(50 100% 98%);
-  --color-border: hsl(52 38% 88%);
-  --color-input: hsl(52 38% 88%);
-  --color-ring: hsl(153 64% 26%);
-  --color-outline: hsl(48 100% 75%);
-  --color-chart-1: hsl(153 64% 32%);
-  --color-chart-2: hsl(48 94% 52%);
-  --color-chart-3: hsl(98 53% 45%);
-  --color-chart-4: hsl(191 70% 42%);
-  --color-chart-5: hsl(22 90% 56%);
-  --radius-lg: 0.75rem;
-  --radius-md: calc(0.75rem - 2px);
-  --radius-sm: calc(0.75rem - 4px);
-  --shadow-soft: 0 20px 45px -25px rgb(21 128 61 / 0.35);
+@layer base {
+  :root {
+    --color-background: hsl(50 60% 97%);
+    --color-foreground: hsl(160 20% 20%);
+    --color-surface: hsl(0 0% 100%);
+    --color-surface-foreground: hsl(154 25% 18%);
+    --color-card: hsl(0 0% 100%);
+    --color-card-foreground: hsl(160 20% 20%);
+    --color-popover: hsl(0 0% 100%);
+    --color-popover-foreground: hsl(160 20% 20%);
+    --color-primary: hsl(153 64% 26%);
+    --color-primary-foreground: hsl(48 100% 96%);
+    --color-secondary: hsl(48 94% 62%);
+    --color-secondary-foreground: hsl(154 40% 20%);
+    --color-muted: hsl(52 45% 92%);
+    --color-muted-foreground: hsl(152 16% 32%);
+    --color-accent: hsl(98 60% 54%);
+    --color-accent-foreground: hsl(158 34% 18%);
+    --color-destructive: hsl(8 70% 54%);
+    --color-destructive-foreground: hsl(50 100% 98%);
+    
+    /* Missing variables I noticed in config mapping but need defaults */
+    --border: hsl(52 38% 88%);
+    --input: hsl(52 38% 88%);
+    --ring: hsl(153 64% 26%);
+    --color-border: hsl(52 38% 88%); /* Kept for compat if used directly */
+    --color-input: hsl(52 38% 88%);
+    --color-ring: hsl(153 64% 26%);
+    --color-outline: hsl(48 100% 75%);
+    
+    --color-chart-1: hsl(153 64% 32%);
+    --color-chart-2: hsl(48 94% 52%);
+    --color-chart-3: hsl(98 53% 45%);
+    --color-chart-4: hsl(191 70% 42%);
+    --color-chart-5: hsl(22 90% 56%);
+    
+    --radius-lg: 0.75rem;
+    --radius-md: calc(0.75rem - 2px);
+    --radius-sm: calc(0.75rem - 4px);
+    
+    --shadow-soft: 0 20px 45px -25px rgb(21 128 61 / 0.35);
+
+    /* Radix Accordion defaults (Shadcn often uses these) */
+    --radix-accordion-content-height: 0;
+  }
+
+  * {
+    @apply border-border;
+  }
+  
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    @apply min-h-screen text-foreground;
+    background: radial-gradient(120% 120% at 50% 0%, rgba(250, 204, 21, 0.18), transparent 60%),
+      radial-gradient(100% 100% at 10% 60%, rgba(16, 185, 129, 0.12), transparent 65%),
+      var(--color-background);
+    font-feature-settings: "ss03", "ss06";
+  }
 }
 
-* {
-  border-color: var(--color-border);
-}
-
-html,
-body {
-  height: 100%;
-}
-
-body {
-  min-height: 100vh;
-  background: radial-gradient(120% 120% at 50% 0%, rgba(250, 204, 21, 0.18), transparent 60%),
-    radial-gradient(100% 100% at 10% 60%, rgba(16, 185, 129, 0.12), transparent 65%),
-    var(--color-background);
-  color: var(--color-foreground);
-  font-feature-settings: "ss03", "ss06";
-}
-
-.surface {
-  background: var(--color-surface);
-  color: var(--color-surface-foreground);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-soft);
-}
-
-.badge-chart-1 {
-  background-color: hsl(var(--color-chart-1) / 0.16);
-  color: hsl(var(--color-chart-1));
-}
-.badge-chart-2 {
-  background-color: hsl(var(--color-chart-2) / 0.16);
-  color: hsl(var(--color-chart-2));
-}
-.badge-chart-3 {
-  background-color: hsl(var(--color-chart-3) / 0.16);
-  color: hsl(var(--color-chart-3));
-}
-.badge-chart-4 {
-  background-color: hsl(var(--color-chart-4) / 0.16);
-  color: hsl(var(--color-chart-4));
-}
-.badge-chart-5 {
-  background-color: hsl(var(--color-chart-5) / 0.16);
-  color: hsl(var(--color-chart-5));
+@layer utilities {
+  .surface {
+    background: var(--color-surface);
+    color: var(--color-surface-foreground);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-soft);
+  }
+  
+  .badge-chart-1 {
+    background-color: hsl(var(--color-chart-1) / 0.16);
+    color: var(--color-chart-1);
+  }
+  .badge-chart-2 {
+    background-color: hsl(var(--color-chart-2) / 0.16);
+    color: var(--color-chart-2);
+  }
+  .badge-chart-3 {
+    background-color: hsl(var(--color-chart-3) / 0.16);
+    color: var(--color-chart-3);
+  }
+  .badge-chart-4 {
+    background-color: hsl(var(--color-chart-4) / 0.16);
+    color: var(--color-chart-4);
+  }
+  .badge-chart-5 {
+    background-color: hsl(var(--color-chart-5) / 0.16);
+    color: var(--color-chart-5);
+  }
 }
