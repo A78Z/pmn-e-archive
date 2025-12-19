@@ -84,6 +84,7 @@ export const DocumentHelpers = {
             query.doesNotExist('folder_id');
         }
         query.descending('createdAt');
+        query.limit(1000); // Increased limit to ensure all files are fetched
         const results = await query.find();
         return results.map(parseObjectToJSON);
     },
@@ -282,6 +283,15 @@ export const FolderHelpers = {
         console.log(`[FolderHelpers.move] Folder name: ${result.get('name')}`);
 
         return parseObjectToJSON(result);
+    },
+
+    async getSubFolders(parentId: string) {
+        const query = new Parse.Query(ParseClasses.FOLDER);
+        query.equalTo('parent_id', parentId);
+        query.ascending('name');
+        query.limit(1000);
+        const results = await query.find();
+        return results.map(parseObjectToJSON);
     },
 };
 

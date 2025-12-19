@@ -490,16 +490,30 @@ export default function DocumentsPage() {
   };
 
 
+  const canRename = (userProfile: any, item: Folder | Document): boolean => {
+    if (!userProfile) return false;
+    // Only admins and owners can rename
+    return ['super_admin', 'admin'].includes(userProfile.role) || (item as any).created_by === userProfile.id || (item as any).uploaded_by === userProfile.id;
+  };
+
   const handleRename = async () => {
     if (!renameValue.trim()) return;
 
     try {
       if (selectedFolder) {
+        if (!canRename(profile, selectedFolder)) {
+          toast.error("Vous n'avez pas la permission de renommer ce dossier");
+          return;
+        }
         await FolderHelpers.update(selectedFolder.id, {
           name: renameValue.trim()
         });
         toast.success('Dossier renommé avec succès');
       } else if (selectedDocument) {
+        if (!canRename(profile, selectedDocument)) {
+          toast.error("Vous n'avez pas la permission de renommer ce document");
+          return;
+        }
         await DocumentHelpers.update(selectedDocument.id, {
           name: renameValue.trim()
         });
@@ -518,10 +532,11 @@ export default function DocumentsPage() {
     }
   };
 
-  const handleShareFolder = async () => {
-    if (!selectedFolder) return;
+  const handleShareFolder = async (folder?: Folder) => {
+    const targetFolder = folder || selectedFolder;
+    if (!targetFolder) return;
 
-    const url = `${window.location.origin}/dashboard/documents?folder=${selectedFolder.id}`;
+    const url = `${window.location.origin}/dashboard/documents?folder=${targetFolder.id}`;
 
     try {
       await navigator.clipboard.writeText(url);
@@ -570,12 +585,26 @@ export default function DocumentsPage() {
     }
   };
 
+  const canDelete = (userProfile: any, item: Folder | Document): boolean => {
+    if (!userProfile) return false;
+    // Only admins and owners can delete
+    return ['super_admin', 'admin'].includes(userProfile.role) || (item as any).created_by === userProfile.id || (item as any).uploaded_by === userProfile.id;
+  };
+
   const handleDeleteFolder = (folder: Folder) => {
+    if (!canDelete(profile, folder)) {
+      toast.error("Vous n'avez pas la permission de supprimer ce dossier");
+      return;
+    }
     setItemToDelete({ type: 'folder', id: folder.id, name: folder.name });
     setIsDeleteDialogOpen(true);
   };
 
   const handleDeleteDocument = (doc: Document) => {
+    if (!canDelete(profile, doc)) {
+      toast.error("Vous n'avez pas la permission de supprimer ce document");
+      return;
+    }
     setItemToDelete({ type: 'document', id: doc.id, name: doc.name });
     setIsDeleteDialogOpen(true);
   };
@@ -623,22 +652,33 @@ export default function DocumentsPage() {
 
   const handleDownloadFolder = async (folder: Folder) => {
     try {
-      toast.loading('Préparation du téléchargement...');
+      toast.loading('Préparation du téléchargement... Cela peut prendre quelques instants.');
       const zip = new JSZip();
 
+      // Recursive function to fetch and add content
       const processFolder = async (folderId: string, currentZip: any) => {
-        const folderDocs = documents.filter(d => d.folder_id === folderId);
-        const subfolders = folders.filter(f => f.parent_id === folderId);
+        // Fetch fresh data from backend to ensure we have EVERYTHING
+        // (bypassing the frontend list limit or current filter state)
+        const [folderDocs, subfolders] = await Promise.all([
+          DocumentHelpers.getByFolder(folderId) as Promise<Document[]>,
+          FolderHelpers.getSubFolders(folderId) as Promise<Folder[]>
+        ]);
 
         // Process documents in parallel
         await Promise.all(folderDocs.map(async (doc) => {
-          if (doc.file?.url) {
+          // Robust URL detection logic
+          const fileUrl = doc.file?.url || (doc as any).file_url || (doc as any).file_path;
+
+          if (fileUrl) {
             try {
-              const response = await fetch(doc.file.url);
+              const response = await fetch(fileUrl);
+              if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
               const blob = await response.blob();
               currentZip.file(doc.name, blob);
             } catch (e) {
               console.error(`Failed to download ${doc.name}`, e);
+              // Add a text file explaining the error for this specific file
+              currentZip.file(`${doc.name}_error.txt`, `Le fichier n'a pas pu être téléchargé. Erreur: ${e}`);
             }
           }
         }));
@@ -646,11 +686,20 @@ export default function DocumentsPage() {
         // Process subfolders
         for (const sub of subfolders) {
           const subZip = currentZip.folder(sub.name);
-          await processFolder(sub.id, subZip);
+          if (subZip) {
+            await processFolder(sub.id, subZip);
+          }
         }
       };
 
       await processFolder(folder.id, zip);
+
+      // Check if ZIP is not empty before downloading
+      if (Object.keys(zip.files).length === 0) {
+        toast.dismiss();
+        toast.warning('Le dossier est vide.');
+        return;
+      }
 
       const content = await zip.generateAsync({ type: "blob" });
       const url = window.URL.createObjectURL(content);
@@ -662,12 +711,12 @@ export default function DocumentsPage() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
       toast.dismiss();
-      toast.success('Dossier téléchargé');
+      toast.success('Dossier téléchargé avec succès');
 
     } catch (error) {
       console.error('Error downloading folder:', error);
       toast.dismiss();
-      toast.error('Erreur lors du téléchargement du dossier');
+      toast.error('Erreur lors de la génération du ZIP');
     }
   };
 
@@ -905,6 +954,7 @@ export default function DocumentsPage() {
                                   setRenameValue(folder.name);
                                   setIsRenameDialogOpen(true);
                                 }}
+                                disabled={!canRename(profile, folder)}
                                 className="whitespace-nowrap cursor-pointer"
                               >
                                 <Edit className="h-4 w-4 mr-2" />
@@ -949,8 +999,7 @@ export default function DocumentsPage() {
                               <DropdownMenuItem
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setSelectedFolder(folder);
-                                  setIsShareDialogOpen(true);
+                                  handleShareFolder(folder);
                                 }}
                                 className="whitespace-nowrap cursor-pointer"
                               >
@@ -973,6 +1022,7 @@ export default function DocumentsPage() {
                                   e.stopPropagation();
                                   handleDeleteFolder(folder);
                                 }}
+                                disabled={!canDelete(profile, folder)}
                                 className="text-red-600 whitespace-nowrap cursor-pointer"
                               >
                                 <Trash2 className="h-4 w-4 mr-2" />
@@ -1009,6 +1059,7 @@ export default function DocumentsPage() {
                                         setRenameValue(doc.name);
                                         setIsRenameDialogOpen(true);
                                       }}
+                                      disabled={!canRename(profile, doc)}
                                       className="whitespace-nowrap cursor-pointer"
                                     >
                                       <Edit className="h-4 w-4 mr-2" />
@@ -1051,6 +1102,7 @@ export default function DocumentsPage() {
                                         e.stopPropagation();
                                         handleDeleteDocument(doc);
                                       }}
+                                      disabled={!canDelete(profile, doc)}
                                       className="text-red-600 whitespace-nowrap cursor-pointer"
                                     >
                                       <Trash2 className="h-4 w-4 mr-2" />
@@ -1095,6 +1147,7 @@ export default function DocumentsPage() {
                                         setRenameValue(subfolder.name);
                                         setIsRenameDialogOpen(true);
                                       }}
+                                      disabled={!canRename(profile, subfolder)}
                                       className="whitespace-nowrap cursor-pointer"
                                     >
                                       <Edit className="h-4 w-4 mr-2" />
@@ -1124,8 +1177,7 @@ export default function DocumentsPage() {
                                     <DropdownMenuItem
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        setSelectedFolder(subfolder);
-                                        setIsShareDialogOpen(true);
+                                        handleShareFolder(subfolder);
                                       }}
                                       className="whitespace-nowrap cursor-pointer"
                                     >
@@ -1148,6 +1200,7 @@ export default function DocumentsPage() {
                                         e.stopPropagation();
                                         handleDeleteFolder(subfolder);
                                       }}
+                                      disabled={!canDelete(profile, subfolder)}
                                       className="text-red-600 whitespace-nowrap cursor-pointer"
                                     >
                                       <Trash2 className="h-4 w-4 mr-2" />
@@ -1191,6 +1244,7 @@ export default function DocumentsPage() {
                                                   setRenameValue(subSubfolder.name);
                                                   setIsRenameDialogOpen(true);
                                                 }}
+                                                disabled={!canRename(profile, subSubfolder)}
                                                 className="whitespace-nowrap cursor-pointer"
                                               >
                                                 <Edit className="h-4 w-4 mr-2" />
@@ -1220,8 +1274,7 @@ export default function DocumentsPage() {
                                               <DropdownMenuItem
                                                 onClick={(e) => {
                                                   e.stopPropagation();
-                                                  setSelectedFolder(subSubfolder);
-                                                  setIsShareDialogOpen(true);
+                                                  handleShareFolder(subSubfolder);
                                                 }}
                                                 className="whitespace-nowrap cursor-pointer"
                                               >
@@ -1244,6 +1297,7 @@ export default function DocumentsPage() {
                                                   e.stopPropagation();
                                                   handleDeleteFolder(subSubfolder);
                                                 }}
+                                                disabled={!canDelete(profile, subSubfolder)}
                                                 className="text-red-600 whitespace-nowrap cursor-pointer"
                                               >
                                                 <Trash2 className="h-4 w-4 mr-2" />
@@ -1287,6 +1341,7 @@ export default function DocumentsPage() {
                                                             setRenameValue(level4Folder.name);
                                                             setIsRenameDialogOpen(true);
                                                           }}
+                                                          disabled={!canRename(profile, level4Folder)}
                                                           className="whitespace-nowrap cursor-pointer"
                                                         >
                                                           <Edit className="h-4 w-4 mr-2" />
@@ -1316,8 +1371,7 @@ export default function DocumentsPage() {
                                                         <DropdownMenuItem
                                                           onClick={(e) => {
                                                             e.stopPropagation();
-                                                            setSelectedFolder(level4Folder);
-                                                            setIsShareDialogOpen(true);
+                                                            handleShareFolder(level4Folder);
                                                           }}
                                                           className="whitespace-nowrap cursor-pointer"
                                                         >
@@ -1340,6 +1394,7 @@ export default function DocumentsPage() {
                                                             e.stopPropagation();
                                                             handleDeleteFolder(level4Folder);
                                                           }}
+                                                          disabled={!canDelete(profile, level4Folder)}
                                                           className="text-red-600 whitespace-nowrap cursor-pointer"
                                                         >
                                                           <Trash2 className="h-4 w-4 mr-2" />
@@ -1390,6 +1445,7 @@ export default function DocumentsPage() {
                                                                   setRenameValue(doc.name);
                                                                   setIsRenameDialogOpen(true);
                                                                 }}
+                                                                disabled={!canRename(profile, doc)}
                                                                 className="whitespace-nowrap cursor-pointer"
                                                               >
                                                                 <Edit className="h-4 w-4 mr-2" />
@@ -1432,6 +1488,7 @@ export default function DocumentsPage() {
                                                                   e.stopPropagation();
                                                                   handleDeleteDocument(doc);
                                                                 }}
+                                                                disabled={!canDelete(profile, doc)}
                                                                 className="text-red-600 whitespace-nowrap cursor-pointer"
                                                               >
                                                                 <Trash2 className="h-4 w-4 mr-2" />
@@ -1472,6 +1529,7 @@ export default function DocumentsPage() {
                                                         setRenameValue(doc.name);
                                                         setIsRenameDialogOpen(true);
                                                       }}
+                                                      disabled={!canRename(profile, doc)}
                                                       className="whitespace-nowrap cursor-pointer"
                                                     >
                                                       <Edit className="h-4 w-4 mr-2" />
@@ -1514,6 +1572,7 @@ export default function DocumentsPage() {
                                                         e.stopPropagation();
                                                         handleDeleteDocument(doc);
                                                       }}
+                                                      disabled={!canDelete(profile, doc)}
                                                       className="text-red-600 whitespace-nowrap cursor-pointer"
                                                     >
                                                       <Trash2 className="h-4 w-4 mr-2" />
@@ -1561,6 +1620,7 @@ export default function DocumentsPage() {
                                               setRenameValue(doc.name);
                                               setIsRenameDialogOpen(true);
                                             }}
+                                            disabled={!canRename(profile, doc)}
                                             className="whitespace-nowrap cursor-pointer"
                                           >
                                             <Edit className="h-4 w-4 mr-2" />
@@ -1592,6 +1652,7 @@ export default function DocumentsPage() {
                                               e.stopPropagation();
                                               handleDeleteDocument(doc);
                                             }}
+                                            disabled={!canDelete(profile, doc)}
                                             className="text-red-600 whitespace-nowrap cursor-pointer"
                                           >
                                             <Trash2 className="h-4 w-4 mr-2" />
