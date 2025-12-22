@@ -57,13 +57,19 @@ export default function UploadPage() {
     try {
       // Get current user from Parse
       const currentUser = Parse.User.current();
-      if (!currentUser) {
+      if (!currentUser || !profile) {
         console.warn('No authenticated user, skipping folder fetch');
         return;
       }
 
-      // Fetch only user's own folders
-      const data = await FolderHelpers.getAllByUser(currentUser.id);
+      // Check for admin role
+      const isAdmin = ['super_admin', 'admin'].includes(profile.role);
+
+      // Fetch folders based on role
+      const data = isAdmin
+        ? await FolderHelpers.getAllForAdmin()
+        : await FolderHelpers.getAllByUser(currentUser.id as string);
+
       setFolders(data.map((f: any) => ({ id: f.id, name: f.name })));
     } catch (error) {
       console.error('Error fetching folders:', error);
