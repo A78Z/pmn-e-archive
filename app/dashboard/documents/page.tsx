@@ -136,6 +136,8 @@ export default function DocumentsPage() {
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [isPreviewDialogOpen, setIsPreviewDialogOpen] = useState(false);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [isMoveDocumentDialogOpen, setIsMoveDocumentDialogOpen] = useState(false);
+  const [moveTargetFolderId, setMoveTargetFolderId] = useState<string>('root');
 
   const [newFolderName, setNewFolderName] = useState('');
   const [newFolderCategory, setNewFolderCategory] = useState('');
@@ -609,6 +611,64 @@ export default function DocumentsPage() {
     setIsDeleteDialogOpen(true);
   };
 
+  const handleMoveDocument = async () => {
+    if (!selectedDocument) return;
+
+    try {
+      const targetFolderId = moveTargetFolderId === 'root' ? undefined : moveTargetFolderId;
+
+      // Update in backend
+      await DocumentHelpers.update(selectedDocument.id, {
+        folder_id: targetFolderId || null // Ensure backend gets null if undefined, assuming backend handles null
+      });
+
+      // Update local state
+      setDocuments(docs => docs.map(d =>
+        d.id === selectedDocument.id
+          ? { ...d, folder_id: targetFolderId }
+          : d
+      ));
+
+      toast.success('Document déplacé avec succès');
+      setIsMoveDocumentDialogOpen(false);
+      setSelectedDocument(null);
+      setMoveTargetFolderId('root');
+    } catch (error) {
+      console.error('Error moving document:', error);
+      toast.error('Erreur lors du déplacement du document');
+    }
+  };
+
+  // Helper to get full path of a folder
+  const getFolderPath = (folderId: string): string => {
+    const folder = folders.find(f => f.id === folderId);
+    if (!folder) return '';
+
+    const parts = [folder.name];
+    let current = folder;
+
+    while (current.parent_id) {
+      const parent = folders.find(f => f.id === current.parent_id);
+      if (parent) {
+        parts.unshift(parent.name);
+        current = parent;
+      } else {
+        break;
+      }
+    }
+
+    return parts.join(' > ');
+  };
+
+  // Prepare sorted folder options with paths
+  const folderOptions = folders
+    .map(f => ({
+      id: f.id,
+      name: f.name,
+      path: getFolderPath(f.id)
+    }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+
   const handleDownload = async (doc: Document) => {
     try {
       // Debug: log the entire document structure
@@ -766,13 +826,6 @@ export default function DocumentsPage() {
       const isOverThis = overId === folder.id;
       const canMove = canMoveFolder(profile, folder);
 
-      // Increase padding based on depth
-      // Level 0: p-4
-      // Level 1: pl-8
-      // Level 2: pl-12
-      // Level 3: pl-16 (approx)
-      // We will handle indentation in the recursive container for cleaner DOM
-
       return (
         <div key={folder.id} className={depth > 0 ? "border-t border-gray-100" : ""}>
           {/* Folder Row */}
@@ -782,6 +835,7 @@ export default function DocumentsPage() {
             isOverThis={isOverThis}
             canMove={canMove}
             onToggle={() => toggleFolder(folder.id)}
+            style={{ paddingLeft: `${Math.min(depth * 1.5 + 1, 8)}rem` }} // Dynamic padding
           >
             {/* Same dropdown menu for ALL levels */}
             <DropdownMenu>
@@ -878,18 +932,17 @@ export default function DocumentsPage() {
 
           {/* Children: Subfolders and Documents */}
           {isExpanded && (
-            <div className={`bg-gray-50 border-t border-gray-100 ${depth === 0 ? 'pl-8' : 'pl-8'}`}>
-              {/* 
-                  Note: nesting indentation is handled by the parent padding.
-                  Each level adds another 'pl-8' block via this div structure.
-               */}
-
-              {/* Recursive Subfolders */}
+            <div className="border-t border-gray-100">
+              {/* Recursive Subfolders - RENDERED FIRST */}
               {subFolders.length > 0 && renderFolderRecursive(subFolders, depth + 1)}
 
-              {/* Documents in this folder */}
+              {/* Documents in this folder - RENDERED LAST */}
               {docs.map((doc) => (
-                <div key={doc.id} className="flex items-center gap-3 p-4 hover:bg-gray-100 transition-colors border-t border-gray-100">
+                <div
+                  key={doc.id}
+                  className="flex items-center gap-3 p-4 hover:bg-gray-100 transition-colors border-t border-gray-100"
+                  style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }} // Match subfolder indentation
+                >
                   <FileText className="h-5 w-5 text-gray-600 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
@@ -953,6 +1006,19 @@ export default function DocumentsPage() {
                       <DropdownMenuItem
                         onClick={(e) => {
                           e.stopPropagation();
+                          setSelectedDocument(doc);
+                          setMoveTargetFolderId(doc.folder_id || 'root');
+                          setIsMoveDocumentDialogOpen(true);
+                        }}
+                        disabled={!canRename(profile, doc)}
+                        className="whitespace-nowrap cursor-pointer"
+                      >
+                        <Folder className="h-4 w-4 mr-2" />
+                        Déplacer
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
                           handleDeleteDocument(doc);
                         }}
                         disabled={!canDelete(profile, doc)}
@@ -967,7 +1033,10 @@ export default function DocumentsPage() {
               ))}
 
               {subFolders.length === 0 && docs.length === 0 && (
-                <div className="p-4 text-sm text-gray-500 italic">
+                <div
+                  className="p-4 text-sm text-gray-500 italic"
+                  style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }}
+                >
                   Dossier vide
                 </div>
               )}
@@ -1121,864 +1190,8 @@ export default function DocumentsPage() {
                 <div className="divide-y divide-gray-100">
                   {/* Folders List View */}
                   {/* Recursive Folder Rendering */}
+                  {/* Recursive Folder Rendering */}
                   {renderFolderRecursive(filteredFolders)}
-
-                  {/* Legacy rendering disabled */}
-                  {false && filteredFolders.map((folder) => {
-                    const isExpanded = expandedFolders.has(folder.id);
-                    const folderDocs = getDocumentsInFolder(folder.id);
-
-                    return (
-                      <div key={folder.id}>
-                        {/* Folder Row */}
-                        <div className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors">
-                          <button
-                            onClick={() => toggleFolder(folder.id)}
-                            className="p-1 hover:bg-gray-200 rounded transition-colors"
-                          >
-                            {isExpanded ? (
-                              <ChevronDown className="h-5 w-5 text-gray-600" />
-                            ) : (
-                              <ChevronRight className="h-5 w-5 text-gray-600" />
-                            )}
-                          </button>
-
-                          <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <Folder className="h-5 w-5 text-blue-600 flex-shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                {folder.folder_number && (
-                                  <span className="text-xs font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
-                                    {folder.folder_number}
-                                  </span>
-                                )}
-                                <h3 className="font-semibold text-gray-900 truncate">{folder.name}</h3>
-                              </div>
-                              <p className="text-sm text-gray-500">
-                                {format(new Date(folder.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                              </p>
-                            </div>
-                            {folder.status && (
-                              <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-                                {folder.status}
-                              </Badge>
-                            )}
-                          </div>
-
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-56">
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedFolder(folder);
-                                  setRenameValue(folder.name);
-                                  setIsRenameDialogOpen(true);
-                                }}
-                                disabled={!canRename(profile, folder)}
-                                className="whitespace-nowrap cursor-pointer"
-                              >
-                                <Edit className="h-4 w-4 mr-2" />
-                                Renommer
-                              </DropdownMenuItem>
-                              {/* Admin only: Modify Number */}
-                              {['admin', 'super_admin'].includes(profile?.role || '') && (
-                                <DropdownMenuItem
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedFolder(folder);
-                                    setNewFolderNumber(folder.folder_number || '');
-                                    setIsModifyNumberDialogOpen(true);
-                                  }}
-                                  className="whitespace-nowrap cursor-pointer"
-                                >
-                                  <Hash className="h-4 w-4 mr-2" />
-                                  Modifier numéro
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDownloadFolder(folder);
-                                }}
-                                className="whitespace-nowrap cursor-pointer"
-                              >
-                                <Download className="h-4 w-4 mr-2" />
-                                Télécharger
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSelectedFolder(folder);
-                                  setIsPreviewDialogOpen(true);
-                                }}
-                                className="whitespace-nowrap cursor-pointer"
-                              >
-                                <Eye className="h-4 w-4 mr-2" />
-                                Prévisualiser
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleShareFolder(folder);
-                                }}
-                                className="whitespace-nowrap cursor-pointer"
-                              >
-                                <Share2 className="h-4 w-4 mr-2" />
-                                Partager
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setParentFolder(folder);
-                                  setIsNewSubFolderDialogOpen(true);
-                                }}
-                                className="whitespace-nowrap cursor-pointer"
-                              >
-                                <FolderPlus className="h-4 w-4 mr-2" />
-                                Nouveau sous-dossier
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteFolder(folder);
-                                }}
-                                disabled={!canDelete(profile, folder)}
-                                className="text-red-600 whitespace-nowrap cursor-pointer"
-                              >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Supprimer
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-
-                        {/* Folder Documents (when expanded) */}
-                        {isExpanded && folderDocs.length > 0 && (
-                          <div className="bg-gray-50 border-t border-gray-100">
-                            {folderDocs.map((doc) => (
-                              <div key={doc.id} className="flex items-center gap-3 p-4 pl-16 hover:bg-gray-100 transition-colors">
-                                <FileText className="h-5 w-5 text-gray-600 flex-shrink-0" />
-                                <div className="flex-1 min-w-0">
-                                  <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
-                                  <p className="text-sm text-gray-500">
-                                    {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                                  </p>
-                                </div>
-
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                      <MoreVertical className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end" className="w-56">
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedDocument(doc);
-                                        setRenameValue(doc.name);
-                                        setIsRenameDialogOpen(true);
-                                      }}
-                                      disabled={!canRename(profile, doc)}
-                                      className="whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Edit className="h-4 w-4 mr-2" />
-                                      Renommer
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDownload(doc);
-                                      }}
-                                      className="whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Download className="h-4 w-4 mr-2" />
-                                      Télécharger
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedDocument(doc);
-                                        setIsPreviewDialogOpen(true);
-                                      }}
-                                      className="whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Eye className="h-4 w-4 mr-2" />
-                                      Prévisualiser
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedDocument(doc);
-                                        setIsShareDialogOpen(true);
-                                      }}
-                                      className="whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Share2 className="h-4 w-4 mr-2" />
-                                      Partager
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeleteDocument(doc);
-                                      }}
-                                      disabled={!canDelete(profile, doc)}
-                                      className="text-red-600 whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Trash2 className="h-4 w-4 mr-2" />
-                                      Supprimer
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Subfolders (when expanded) */}
-                        {isExpanded && getSubFolders(folder.id).map((subfolder) => {
-                          const canMoveSubfolder = canMoveFolder(profile, subfolder);
-                          const isOverSubfolder = overId === subfolder.id;
-                          const isSubfolderExpanded = expandedFolders.has(subfolder.id);
-                          const subfolderDocs = getDocumentsInFolder(subfolder.id);
-                          const subSubfolders = getSubFolders(subfolder.id);
-
-                          return (
-                            <div key={subfolder.id} className="bg-gray-50 border-t border-gray-100 pl-8">
-                              <SortableFolderRow
-                                folder={subfolder}
-                                isExpanded={isSubfolderExpanded}
-                                isOverThis={isOverSubfolder}
-                                canMove={canMoveSubfolder}
-                                onToggle={() => toggleFolder(subfolder.id)}
-                              >
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                      <MoreVertical className="h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end" className="w-56">
-                                    {/* Subfolder actions similar to folder actions */}
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedFolder(subfolder);
-                                        setRenameValue(subfolder.name);
-                                        setIsRenameDialogOpen(true);
-                                      }}
-                                      disabled={!canRename(profile, subfolder)}
-                                      className="whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Edit className="h-4 w-4 mr-2" />
-                                      Renommer
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDownloadFolder(subfolder);
-                                      }}
-                                      className="whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Download className="h-4 w-4 mr-2" />
-                                      Télécharger
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setSelectedFolder(subfolder);
-                                        setIsPreviewDialogOpen(true);
-                                      }}
-                                      className="whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Eye className="h-4 w-4 mr-2" />
-                                      Prévisualiser
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleShareFolder(subfolder);
-                                      }}
-                                      className="whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Share2 className="h-4 w-4 mr-2" />
-                                      Partager
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setParentFolder(subfolder);
-                                        setIsNewSubFolderDialogOpen(true);
-                                      }}
-                                      className="whitespace-nowrap cursor-pointer"
-                                    >
-                                      <FolderPlus className="h-4 w-4 mr-2" />
-                                      Nouveau sous-dossier
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeleteFolder(subfolder);
-                                      }}
-                                      disabled={!canDelete(profile, subfolder)}
-                                      className="text-red-600 whitespace-nowrap cursor-pointer"
-                                    >
-                                      <Trash2 className="h-4 w-4 mr-2" />
-                                      Supprimer
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </SortableFolderRow>
-
-                              {/* Subfolder Contents (Documents & Nested Folders) */}
-                              {isSubfolderExpanded && (
-                                <div className="border-t border-gray-100">
-                                  {/* Nested Folders (Sub-subfolders) */}
-                                  {subSubfolders.map((subSubfolder) => {
-                                    const canMoveSubSubfolder = canMoveFolder(profile, subSubfolder);
-                                    const isOverSubSubfolder = overId === subSubfolder.id;
-                                    const isSubSubfolderExpanded = expandedFolders.has(subSubfolder.id);
-                                    const subSubfolderDocs = getDocumentsInFolder(subSubfolder.id);
-                                    const subSubSubfolders = getSubFolders(subSubfolder.id);
-
-                                    return (
-                                      <div key={subSubfolder.id} className="pl-8 bg-gray-50/50 border-t border-gray-100">
-                                        <SortableFolderRow
-                                          folder={subSubfolder}
-                                          isExpanded={isSubSubfolderExpanded}
-                                          isOverThis={isOverSubSubfolder}
-                                          canMove={canMoveSubSubfolder}
-                                          onToggle={() => toggleFolder(subSubfolder.id)}
-                                        >
-                                          <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                              <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                                <MoreVertical className="h-4 w-4" />
-                                              </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end" className="w-56">
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  setSelectedFolder(subSubfolder);
-                                                  setRenameValue(subSubfolder.name);
-                                                  setIsRenameDialogOpen(true);
-                                                }}
-                                                disabled={!canRename(profile, subSubfolder)}
-                                                className="whitespace-nowrap cursor-pointer"
-                                              >
-                                                <Edit className="h-4 w-4 mr-2" />
-                                                Renommer
-                                              </DropdownMenuItem>
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleDownloadFolder(subSubfolder);
-                                                }}
-                                                className="whitespace-nowrap cursor-pointer"
-                                              >
-                                                <Download className="h-4 w-4 mr-2" />
-                                                Télécharger
-                                              </DropdownMenuItem>
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  setSelectedFolder(subSubfolder);
-                                                  setIsPreviewDialogOpen(true);
-                                                }}
-                                                className="whitespace-nowrap cursor-pointer"
-                                              >
-                                                <Eye className="h-4 w-4 mr-2" />
-                                                Prévisualiser
-                                              </DropdownMenuItem>
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleShareFolder(subSubfolder);
-                                                }}
-                                                className="whitespace-nowrap cursor-pointer"
-                                              >
-                                                <Share2 className="h-4 w-4 mr-2" />
-                                                Partager
-                                              </DropdownMenuItem>
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  setParentFolder(subSubfolder);
-                                                  setIsNewSubFolderDialogOpen(true);
-                                                }}
-                                                className="whitespace-nowrap cursor-pointer"
-                                              >
-                                                <FolderPlus className="h-4 w-4 mr-2" />
-                                                Nouveau sous-dossier
-                                              </DropdownMenuItem>
-                                              <DropdownMenuItem
-                                                onClick={(e) => {
-                                                  e.stopPropagation();
-                                                  handleDeleteFolder(subSubfolder);
-                                                }}
-                                                disabled={!canDelete(profile, subSubfolder)}
-                                                className="text-red-600 whitespace-nowrap cursor-pointer"
-                                              >
-                                                <Trash2 className="h-4 w-4 mr-2" />
-                                                Supprimer
-                                              </DropdownMenuItem>
-                                            </DropdownMenuContent>
-                                          </DropdownMenu>
-                                        </SortableFolderRow>
-
-                                        {/* Level 4 Content (Documents & Nested Folders) */}
-                                        {isSubSubfolderExpanded && (
-                                          <div className="border-t border-gray-100\">
-                                            {/* Level 4 Folders */}
-                                            {subSubSubfolders.map((level4Folder) => {
-                                              const canMoveLevel4 = canMoveFolder(profile, level4Folder);
-                                              const isOverLevel4 = overId === level4Folder.id;
-                                              const isLevel4Expanded = expandedFolders.has(level4Folder.id);
-                                              const level4Docs = getDocumentsInFolder(level4Folder.id);
-                                              const level5Folders = getSubFolders(level4Folder.id);
-
-                                              return (
-                                                <div key={level4Folder.id} className="pl-8 bg-gray-50/30 border-t border-gray-100">
-                                                  <SortableFolderRow
-                                                    folder={level4Folder}
-                                                    isExpanded={isLevel4Expanded}
-                                                    isOverThis={isOverLevel4}
-                                                    canMove={canMoveLevel4}
-                                                    onToggle={() => toggleFolder(level4Folder.id)}
-                                                  >
-                                                    <DropdownMenu>
-                                                      <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                                          <MoreVertical className="h-4 w-4" />
-                                                        </Button>
-                                                      </DropdownMenuTrigger>
-                                                      <DropdownMenuContent align="end" className="w-56">
-                                                        <DropdownMenuItem
-                                                          onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setSelectedFolder(level4Folder);
-                                                            setRenameValue(level4Folder.name);
-                                                            setIsRenameDialogOpen(true);
-                                                          }}
-                                                          disabled={!canRename(profile, level4Folder)}
-                                                          className="whitespace-nowrap cursor-pointer"
-                                                        >
-                                                          <Edit className="h-4 w-4 mr-2" />
-                                                          Renommer
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                          onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDownloadFolder(level4Folder);
-                                                          }}
-                                                          className="whitespace-nowrap cursor-pointer"
-                                                        >
-                                                          <Download className="h-4 w-4 mr-2" />
-                                                          Télécharger
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                          onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setSelectedFolder(level4Folder);
-                                                            setIsPreviewDialogOpen(true);
-                                                          }}
-                                                          className="whitespace-nowrap cursor-pointer"
-                                                        >
-                                                          <Eye className="h-4 w-4 mr-2" />
-                                                          Prévisualiser
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                          onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleShareFolder(level4Folder);
-                                                          }}
-                                                          className="whitespace-nowrap cursor-pointer"
-                                                        >
-                                                          <Share2 className="h-4 w-4 mr-2" />
-                                                          Partager
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                          onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setParentFolder(level4Folder);
-                                                            setIsNewSubFolderDialogOpen(true);
-                                                          }}
-                                                          className="whitespace-nowrap cursor-pointer"
-                                                        >
-                                                          <FolderPlus className="h-4 w-4 mr-2" />
-                                                          Nouveau sous-dossier
-                                                        </DropdownMenuItem>
-                                                        <DropdownMenuItem
-                                                          onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDeleteFolder(level4Folder);
-                                                          }}
-                                                          disabled={!canDelete(profile, level4Folder)}
-                                                          className="text-red-600 whitespace-nowrap cursor-pointer"
-                                                        >
-                                                          <Trash2 className="h-4 w-4 mr-2" />
-                                                          Supprimer
-                                                        </DropdownMenuItem>
-                                                      </DropdownMenuContent>
-                                                    </DropdownMenu>
-                                                  </SortableFolderRow>
-
-                                                  {/* Level 5 Content (Documents & Nested Folders) */}
-                                                  {isLevel4Expanded && (
-                                                    <div className="border-t border-gray-100 pl-8">
-                                                      {/* Level 5 Folders */}
-                                                      {level5Folders.map((level5Folder) => (
-                                                        <div key={level5Folder.id} className="flex items-center gap-3 p-4 pl-12 hover:bg-gray-100 transition-colors border-t border-gray-100">
-                                                          <Folder className="h-5 w-5 text-blue-200 flex-shrink-0" />
-                                                          <div className="flex-1 min-w-0">
-                                                            <h4 className="font-medium text-gray-900 truncate">{level5Folder.name}</h4>
-                                                            <p className="text-sm text-gray-500">
-                                                              {format(new Date(level5Folder.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                                                            </p>
-                                                          </div>
-                                                        </div>
-                                                      ))}
-
-                                                      {/* Level 5 Documents */}
-                                                      {level4Docs.map((doc) => (
-                                                        <div key={doc.id} className="flex items-center gap-3 p-4 pl-12 hover:bg-gray-100 transition-colors border-t border-gray-100">
-                                                          <FileText className="h-5 w-5 text-gray-400 flex-shrink-0" />
-                                                          <div className="flex-1 min-w-0">
-                                                            <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
-                                                            <p className="text-sm text-gray-500">
-                                                              {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                                                            </p>
-                                                          </div>
-                                                          {/* Document Actions */}
-                                                          <DropdownMenu>
-                                                            <DropdownMenuTrigger asChild>
-                                                              <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                                                <MoreVertical className="h-4 w-4" />
-                                                              </Button>
-                                                            </DropdownMenuTrigger>
-                                                            <DropdownMenuContent align="end" className="w-56">
-                                                              <DropdownMenuItem
-                                                                onClick={(e) => {
-                                                                  e.stopPropagation();
-                                                                  setSelectedDocument(doc);
-                                                                  setRenameValue(doc.name);
-                                                                  setIsRenameDialogOpen(true);
-                                                                }}
-                                                                disabled={!canRename(profile, doc)}
-                                                                className="whitespace-nowrap cursor-pointer"
-                                                              >
-                                                                <Edit className="h-4 w-4 mr-2" />
-                                                                Renommer
-                                                              </DropdownMenuItem>
-                                                              <DropdownMenuItem
-                                                                onClick={(e) => {
-                                                                  e.stopPropagation();
-                                                                  handleDownload(doc);
-                                                                }}
-                                                                className="whitespace-nowrap cursor-pointer"
-                                                              >
-                                                                <Download className="h-4 w-4 mr-2" />
-                                                                Télécharger
-                                                              </DropdownMenuItem>
-                                                              <DropdownMenuItem
-                                                                onClick={(e) => {
-                                                                  e.stopPropagation();
-                                                                  setSelectedDocument(doc);
-                                                                  setIsPreviewDialogOpen(true);
-                                                                }}
-                                                                className="whitespace-nowrap cursor-pointer"
-                                                              >
-                                                                <Eye className="h-4 w-4 mr-2" />
-                                                                Prévisualiser
-                                                              </DropdownMenuItem>
-                                                              <DropdownMenuItem
-                                                                onClick={(e) => {
-                                                                  e.stopPropagation();
-                                                                  setSelectedDocument(doc);
-                                                                  setIsShareDialogOpen(true);
-                                                                }}
-                                                                className="whitespace-nowrap cursor-pointer"
-                                                              >
-                                                                <Share2 className="h-4 w-4 mr-2" />
-                                                                Partager
-                                                              </DropdownMenuItem>
-                                                              <DropdownMenuItem
-                                                                onClick={(e) => {
-                                                                  e.stopPropagation();
-                                                                  handleDeleteDocument(doc);
-                                                                }}
-                                                                disabled={!canDelete(profile, doc)}
-                                                                className="text-red-600 whitespace-nowrap cursor-pointer"
-                                                              >
-                                                                <Trash2 className="h-4 w-4 mr-2" />
-                                                                Supprimer
-                                                              </DropdownMenuItem>
-                                                            </DropdownMenuContent>
-                                                          </DropdownMenu>
-                                                        </div>
-                                                      ))}
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              );
-                                            })}
-
-                                            {/* Level 4 Documents */}
-                                            {subSubfolderDocs.map((doc) => (
-                                              <div key={doc.id} className="flex items-center gap-3 p-4 pl-12 hover:bg-gray-100 transition-colors border-t border-gray-100">
-                                                <FileText className="h-5 w-5 text-gray-400 flex-shrink-0" />
-                                                <div className="flex-1 min-w-0">
-                                                  <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
-                                                  <p className="text-sm text-gray-500">
-                                                    {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                                                  </p>
-                                                </div>
-                                                {/* Document Actions */}
-                                                <DropdownMenu>
-                                                  <DropdownMenuTrigger asChild>
-                                                    <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                                      <MoreVertical className="h-4 w-4" />
-                                                    </Button>
-                                                  </DropdownMenuTrigger>
-                                                  <DropdownMenuContent align="end" className="w-56">
-                                                    <DropdownMenuItem
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setSelectedDocument(doc);
-                                                        setRenameValue(doc.name);
-                                                        setIsRenameDialogOpen(true);
-                                                      }}
-                                                      disabled={!canRename(profile, doc)}
-                                                      className="whitespace-nowrap cursor-pointer"
-                                                    >
-                                                      <Edit className="h-4 w-4 mr-2" />
-                                                      Renommer
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDownload(doc);
-                                                      }}
-                                                      className="whitespace-nowrap cursor-pointer"
-                                                    >
-                                                      <Download className="h-4 w-4 mr-2" />
-                                                      Télécharger
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setSelectedDocument(doc);
-                                                        setIsPreviewDialogOpen(true);
-                                                      }}
-                                                      className="whitespace-nowrap cursor-pointer"
-                                                    >
-                                                      <Eye className="h-4 w-4 mr-2" />
-                                                      Prévisualiser
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setSelectedDocument(doc);
-                                                        setIsShareDialogOpen(true);
-                                                      }}
-                                                      className="whitespace-nowrap cursor-pointer"
-                                                    >
-                                                      <Share2 className="h-4 w-4 mr-2" />
-                                                      Partager
-                                                    </DropdownMenuItem>
-                                                    <DropdownMenuItem
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDeleteDocument(doc);
-                                                      }}
-                                                      disabled={!canDelete(profile, doc)}
-                                                      className="text-red-600 whitespace-nowrap cursor-pointer"
-                                                    >
-                                                      <Trash2 className="h-4 w-4 mr-2" />
-                                                      Supprimer
-                                                    </DropdownMenuItem>
-                                                  </DropdownMenuContent>
-                                                </DropdownMenu>
-                                              </div>
-                                            ))}
-
-                                            {subSubfolderDocs.length === 0 && subSubSubfolders.length === 0 && (
-                                              <div className="p-4 pl-12 text-sm text-gray-500 italic">
-                                                Dossier vide
-                                              </div>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-
-                                  {/* Documents in Subfolder */}
-                                  {subfolderDocs.map((doc) => (
-                                    <div key={doc.id} className="flex items-center gap-3 p-4 pl-16 hover:bg-gray-100 transition-colors bg-gray-50/50 border-t border-gray-100">
-                                      <FileText className="h-5 w-5 text-gray-500 flex-shrink-0" />
-                                      <div className="flex-1 min-w-0">
-                                        <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
-                                        <p className="text-sm text-gray-500">
-                                          {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                                        </p>
-                                      </div>
-
-                                      {/* Document Actions */}
-                                      <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                          <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                                            <MoreVertical className="h-4 w-4" />
-                                          </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end" className="w-56">
-                                          <DropdownMenuItem
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setSelectedDocument(doc);
-                                              setRenameValue(doc.name);
-                                              setIsRenameDialogOpen(true);
-                                            }}
-                                            disabled={!canRename(profile, doc)}
-                                            className="whitespace-nowrap cursor-pointer"
-                                          >
-                                            <Edit className="h-4 w-4 mr-2" />
-                                            Renommer
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleDownload(doc);
-                                            }}
-                                            className="whitespace-nowrap cursor-pointer"
-                                          >
-                                            <Download className="h-4 w-4 mr-2" />
-                                            Télécharger
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setSelectedDocument(doc);
-                                              setIsPreviewDialogOpen(true);
-                                            }}
-                                            className="whitespace-nowrap cursor-pointer"
-                                          >
-                                            <Eye className="h-4 w-4 mr-2" />
-                                            Prévisualiser
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              handleDeleteDocument(doc);
-                                            }}
-                                            disabled={!canDelete(profile, doc)}
-                                            className="text-red-600 whitespace-nowrap cursor-pointer"
-                                          >
-                                            <Trash2 className="h-4 w-4 mr-2" />
-                                            Supprimer
-                                          </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                      </DropdownMenu>
-                                    </div>
-                                  ))}
-
-                                  {subfolderDocs.length === 0 && subSubfolders.length === 0 && (
-                                    <div className="p-4 pl-16 text-sm text-gray-500 italic">
-                                      Dossier vide
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-
-                  {/* Root Documents List */}
-                  {filteredDocuments.map((doc) => (
-                    <div key={doc.id} className="flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors">
-                      <div className="w-6" /> {/* Spacer for alignment */}
-                      <FileText className="h-5 w-5 text-gray-600 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
-                        <p className="text-sm text-gray-500">
-                          {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
-                        </p>
-                      </div>
-
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 flex-shrink-0">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-56">
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedDocument(doc);
-                              setRenameValue(doc.name);
-                              setIsRenameDialogOpen(true);
-                            }}
-                            className="whitespace-nowrap cursor-pointer"
-                          >
-                            <Edit className="h-4 w-4 mr-2" />
-                            Renommer
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDownload(doc);
-                            }}
-                            className="whitespace-nowrap cursor-pointer"
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            Télécharger
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedDocument(doc);
-                              setIsPreviewDialogOpen(true);
-                            }}
-                            className="whitespace-nowrap cursor-pointer"
-                          >
-                            <Eye className="h-4 w-4 mr-2" />
-                            Prévisualiser
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedDocument(doc);
-                              setIsShareDialogOpen(true);
-                            }}
-                            className="whitespace-nowrap cursor-pointer"
-                          >
-                            <Share2 className="h-4 w-4 mr-2" />
-                            Partager
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteDocument(doc);
-                            }}
-                            className="text-red-600 whitespace-nowrap cursor-pointer"
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Supprimer
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  ))}
                 </div>
               </SortableContext>
               <DragOverlay>
@@ -2492,7 +1705,49 @@ export default function DocumentsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div >
+
+      {/* Move Document Dialog */}
+      <Dialog open={isMoveDocumentDialogOpen} onOpenChange={setIsMoveDocumentDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center text-blue-700">
+              <Folder className="h-5 w-5 mr-2" />
+              Déplacer le document
+            </DialogTitle>
+            <DialogDescription>
+              Sélectionnez le dossier de destination pour "{selectedDocument?.name}"
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="destination-folder">Dossier de destination</Label>
+              <Select value={moveTargetFolderId} onValueChange={setMoveTargetFolderId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Sélectionner un dossier" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px]">
+                  <SelectItem value="root">
+                    <span className="text-gray-500 italic">Racine (aucun dossier)</span>
+                  </SelectItem>
+                  {folderOptions.map(folder => (
+                    <SelectItem key={folder.id} value={folder.id}>
+                      {folder.path}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsMoveDocumentDialogOpen(false)}>
+              Annuler
+            </Button>
+            <Button onClick={handleMoveDocument} className="bg-blue-600 hover:bg-blue-700">
+              Déplacer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
-

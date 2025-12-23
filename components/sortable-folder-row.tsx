@@ -21,6 +21,7 @@ interface SortableFolderRowProps {
     canMove: boolean;
     onToggle: () => void;
     children: ReactNode;
+    style?: React.CSSProperties;
 }
 
 export function SortableFolderRow({
@@ -30,6 +31,7 @@ export function SortableFolderRow({
     canMove,
     onToggle,
     children,
+    style: propStyle,
 }: SortableFolderRowProps) {
     const {
         attributes,
@@ -44,6 +46,7 @@ export function SortableFolderRow({
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.5 : 1,
+        ...propStyle,
     };
 
     return (

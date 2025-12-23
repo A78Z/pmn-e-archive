@@ -17,6 +17,7 @@ import { sanitizeFilenames, needsSanitization, validateFilename } from '@/lib/fi
 interface FolderOption {
   id: string;
   name: string;
+  path: string;
 }
 
 type FileStatus = 'pending' | 'uploading' | 'success' | 'error';
@@ -53,6 +54,30 @@ export default function UploadPage() {
     }
   }, [profile]);
 
+  // Helper to get full path of a folder
+  const getFolderPath = (folderId: string, allFolders: any[]): string => {
+    const folder = allFolders.find(f => f.id === folderId);
+    if (!folder) return '';
+
+    // Safety check for circular references or deep nesting
+    const parts = [folder.name];
+    let current = folder;
+    let depth = 0;
+
+    while (current.parent_id && depth < 10) {
+      const parent = allFolders.find(f => f.id === current.parent_id);
+      if (parent) {
+        parts.unshift(parent.name);
+        current = parent;
+        depth++;
+      } else {
+        break;
+      }
+    }
+
+    return parts.join(' > ');
+  };
+
   const fetchFolders = async () => {
     try {
       // Get current user from Parse
@@ -70,7 +95,14 @@ export default function UploadPage() {
         ? await FolderHelpers.getAllForAdmin()
         : await FolderHelpers.getAllByUser(currentUser.id as string);
 
-      setFolders(data.map((f: any) => ({ id: f.id, name: f.name })));
+      // Map folders with full path
+      const options = data.map((f: any) => ({
+        id: f.id,
+        name: f.name,
+        path: getFolderPath(f.id, data)
+      })).sort((a: FolderOption, b: FolderOption) => a.path.localeCompare(b.path));
+
+      setFolders(options);
     } catch (error) {
       console.error('Error fetching folders:', error);
     }
@@ -561,7 +593,7 @@ export default function UploadPage() {
                 <SelectItem value="root">Racine (aucun dossier)</SelectItem>
                 {folders.map(folder => (
                   <SelectItem key={folder.id} value={folder.id}>
-                    {folder.name}
+                    {folder.path}
                   </SelectItem>
                 ))}
               </SelectContent>
