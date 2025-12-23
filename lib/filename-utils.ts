@@ -13,8 +13,11 @@ const STRICT_INVALID_CHARS_REGEX = /[/\\]/g;
 
 /**
  * Unicode control characters (invisible characters that can cause issues)
+ * Note: We only block C0 controls (0-31) and DEL (127).
+ * We explicitly ALLOW C1 controls (128-159) because they can sometimes 
+ * represent valid characters in mixed encodings (e.g. smart quotes in CP1252).
  */
-const CONTROL_CHARS_REGEX = /[\x00-\x1F\x7F-\x9F]/g;
+const CONTROL_CHARS_REGEX = /[\x00-\x1F\x7F]/g;
 
 /**
  * Maximum filename length (including extension)
