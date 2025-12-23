@@ -102,6 +102,45 @@ export function sanitizeFilename(filename: string): string {
     return result;
 }
 
+
+/**
+ * Sanitizes a filename STRICTLY for backend storage (Parse Server compatibility)
+ * Replaces spaces, special chars, and potentially problematic sequences with safe alternatives.
+ * This does NOT affect the display name shown to the user.
+ */
+export function sanitizeForStorage(filename: string): string {
+    if (!filename) return `unnamed-file-${Date.now()}`;
+
+    // 1. Normalize Unicode
+    let safeName = normalizeUnicode(filename);
+
+    // 2. Remove extension temporarily to process name
+    const lastDotIndex = safeName.lastIndexOf('.');
+    let name = safeName;
+    let ext = '';
+
+    if (lastDotIndex > 0) {
+        name = safeName.substring(0, lastDotIndex);
+        ext = safeName.substring(lastDotIndex);
+    }
+
+    // 3. Replace non-alphanumeric chars (except dash and underscore) with dash
+    // This effectively handles spaces, quotes, parens, etc.
+    name = name.replace(/[^a-zA-Z0-9_\-]/g, '-');
+
+    // 4. Remove consecutive dashes
+    name = name.replace(/-+/g, '-');
+
+    // 5. Trim dashes
+    name = name.replace(/^-+|-+$/g, '');
+
+    // 6. Ensure non-empty
+    if (!name) name = 'file';
+
+    // 7. Add timestamp to ensure uniqueness and avoid conflicts
+    return `${name}-${Date.now()}${ext}`;
+}
+
 /**
  * Validates a filename and returns validation result with errors
  * 

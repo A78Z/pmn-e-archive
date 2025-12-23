@@ -631,13 +631,15 @@ export const FileHelpers = {
     async uploadFile(file: File, fileName?: string): Promise<Parse.File> {
         try {
             // Import sanitization function dynamically to avoid circular dependencies
-            const { sanitizeFilename } = await import('./filename-utils');
+            const { sanitizeFilename, sanitizeForStorage } = await import('./filename-utils');
 
             const originalName = fileName || file.name;
-            const sanitizedName = sanitizeFilename(originalName);
+            // Use strict sanitization for the storage filename (Parse.File) to avoid server errors
+            const storageName = sanitizeForStorage(originalName);
 
-            // Create Parse File with sanitized name
-            const parseFile = new Parse.File(sanitizedName, file);
+            // Create Parse File with storage-safe name
+            // The display name (originalName) will be stored in the Document object separately
+            const parseFile = new Parse.File(storageName, file);
 
             // Attempt to save with retry logic
             let lastError: any;

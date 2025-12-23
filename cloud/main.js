@@ -71,6 +71,42 @@ function sanitizeFilename(filename) {
 }
 
 /**
+ * Sanitizes a filename STRICTLY for backend storage (Parse Server compatibility)
+ * Replaces spaces, special chars, and potentially problematic sequences with safe alternatives.
+ */
+function sanitizeForStorage(filename) {
+    if (!filename) return `unnamed-file-${Date.now()}`;
+
+    // 1. Normalize Unicode
+    let safeName = normalizeUnicode(filename);
+
+    // 2. Remove extension temporarily to process name
+    const lastDotIndex = safeName.lastIndexOf('.');
+    let name = safeName;
+    let ext = '';
+
+    if (lastDotIndex > 0) {
+        name = safeName.substring(0, lastDotIndex);
+        ext = safeName.substring(lastDotIndex);
+    }
+
+    // 3. Replace non-alphanumeric chars (except dash and underscore) with dash
+    name = name.replace(/[^a-zA-Z0-9_\-]/g, '-');
+
+    // 4. Remove consecutive dashes
+    name = name.replace(/-+/g, '-');
+
+    // 5. Trim dashes
+    name = name.replace(/^-+|-+$/g, '');
+
+    // 6. Ensure non-empty
+    if (!name) name = 'file';
+
+    // 7. Add timestamp
+    return `${name}-${Date.now()}${ext}`;
+}
+
+/**
  * Validates a filename
  */
 function validateFilename(filename) {
@@ -94,156 +130,51 @@ function validateFilename(filename) {
         errors.push(`Nom trop long (${filename.length} caractères, max ${MAX_FILENAME_LENGTH})`);
     }
 
-    if (filename !== filename.trim()) {
-        errors.push('Espaces en début ou fin de nom');
-    }
-
-    if (MULTIPLE_SPACES_REGEX.test(filename)) {
-        errors.push('Espaces multiples consécutifs détectés');
-    }
-
     return {
         valid: errors.length === 0,
         errors,
         sanitized: errors.length > 0 ? sanitizeFilename(filename) : undefined
     };
 }
+// ... (skip lines) ...
+try {
+    // Create Parse File with STRICT storage-safe name
+    const storageName = sanitizeForStorage(fileName);
+    const parseFile = new Parse.File(storageName, { base64: fileData });
+    await parseFile.save({ useMasterKey: true });
 
-// ============================================================================
-// Cloud Functions
-// ============================================================================
+    // Create Document object
+    const Document = Parse.Object.extend('Document');
+    const doc = new Document();
 
-/**
- * Cloud Function: Validate Filename
- * 
- * Usage from client:
- * const result = await Parse.Cloud.run('validateFilename', { filename: 'test.pdf' });
- */
-Parse.Cloud.define('validateFilename', async (request) => {
-    const { filename } = request.params;
+    doc.set('name', sanitizedName);
+    doc.set('file_path', parseFile.url());
+    doc.set('category', category);
+    doc.set('description', description || null);
+    doc.set('tags', tags || []);
+    doc.set('uploaded_by', user.id);
 
-    if (!filename) {
-        throw new Parse.Error(Parse.Error.VALIDATION_ERROR, 'Filename is required');
+    if (folderId) {
+        doc.set('folder_id', folderId);
     }
 
-    const validation = validateFilename(filename);
+    // Save document
+    await doc.save(null, { useMasterKey: true });
 
     return {
-        valid: validation.valid,
-        errors: validation.errors,
-        sanitized: validation.sanitized || sanitizeFilename(filename),
-        original: filename
+        success: true,
+        documentId: doc.id,
+        fileName: sanitizedName,
+        fileUrl: parseFile.url(),
+        renamed: fileName !== sanitizedName
     };
-});
-
-/**
- * Cloud Function: Sanitize Filename
- * 
- * Usage from client:
- * const sanitized = await Parse.Cloud.run('sanitizeFilename', { filename: 'test:file?.pdf' });
- */
-Parse.Cloud.define('sanitizeFilename', async (request) => {
-    const { filename } = request.params;
-
-    if (!filename) {
-        throw new Parse.Error(Parse.Error.VALIDATION_ERROR, 'Filename is required');
-    }
-
-    return {
-        original: filename,
-        sanitized: sanitizeFilename(filename)
-    };
-});
-
-/**
- * Cloud Function: Upload Document with Validation
- * 
- * This function handles the complete upload process with server-side validation
- * 
- * Usage from client:
- * const result = await Parse.Cloud.run('uploadDocument', {
- *   fileName: 'document.pdf',
- *   fileData: base64String,
- *   category: 'Archives',
- *   folderId: 'abc123',
- *   description: 'Description',
- *   tags: ['tag1', 'tag2']
- * });
- */
-Parse.Cloud.define('uploadDocument', async (request) => {
-    const { fileName, fileData, category, folderId, description, tags } = request.params;
-    const user = request.user;
-
-    // Authentication check
-    if (!user) {
-        throw new Parse.Error(
-            Parse.Error.INVALID_SESSION_TOKEN,
-            'Utilisateur non authentifié'
-        );
-    }
-
-    // Validate required fields
-    if (!fileName) {
-        throw new Parse.Error(Parse.Error.VALIDATION_ERROR, 'Le nom de fichier est requis');
-    }
-
-    if (!fileData) {
-        throw new Parse.Error(Parse.Error.VALIDATION_ERROR, 'Les données du fichier sont requises');
-    }
-
-    if (!category) {
-        throw new Parse.Error(Parse.Error.VALIDATION_ERROR, 'La catégorie est requise');
-    }
-
-    // Sanitize filename
-    const sanitizedName = sanitizeFilename(fileName);
-
-    // Validate sanitized filename
-    const validation = validateFilename(sanitizedName);
-    if (!validation.valid) {
-        throw new Parse.Error(
-            Parse.Error.VALIDATION_ERROR,
-            `Le nom de fichier "${fileName}" est invalide: ${validation.errors.join(', ')}`
-        );
-    }
-
-    try {
-        // Create Parse File with sanitized name
-        const parseFile = new Parse.File(sanitizedName, { base64: fileData });
-        await parseFile.save({ useMasterKey: true });
-
-        // Create Document object
-        const Document = Parse.Object.extend('Document');
-        const doc = new Document();
-
-        doc.set('name', sanitizedName);
-        doc.set('file_path', parseFile.url());
-        doc.set('category', category);
-        doc.set('description', description || null);
-        doc.set('tags', tags || []);
-        doc.set('uploaded_by', user.id);
-
-        if (folderId) {
-            doc.set('folder_id', folderId);
-        }
-
-        // Save document
-        await doc.save(null, { useMasterKey: true });
-
-        return {
-            success: true,
-            documentId: doc.id,
-            fileName: sanitizedName,
-            fileUrl: parseFile.url(),
-            renamed: fileName !== sanitizedName
-        };
-    } catch (error) {
-        console.error('Upload error:', error);
-        throw new Parse.Error(
-            Parse.Error.INTERNAL_SERVER_ERROR,
-            `Erreur lors de l'upload: ${error.message}`
-        );
-    }
+} catch (error) {
+    console.error('Upload error:', error);
+    throw new Parse.Error(
+        Parse.Error.INTERNAL_SERVER_ERROR,
+        `Erreur lors de l'upload: ${error.message}`
+    );
+}
 });
 
 /**
