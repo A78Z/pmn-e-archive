@@ -114,6 +114,7 @@ export const FolderHelpers = {
         }
 
         query.ascending('name');
+        query.limit(10000); // Updated limit to ensure all folders are fetched
         const results = await query.find();
         return results.map(parseObjectToJSON);
     },
@@ -127,6 +128,7 @@ export const FolderHelpers = {
         const query = new Parse.Query(ParseClasses.FOLDER);
         query.equalTo('created_by', userId);
         query.ascending('name');
+        query.limit(10000); // Updated limit to ensure all folders are fetched
         const results = await query.find();
         return results.map(parseObjectToJSON);
     },
@@ -289,7 +291,7 @@ export const FolderHelpers = {
         const query = new Parse.Query(ParseClasses.FOLDER);
         query.equalTo('parent_id', parentId);
         query.ascending('name');
-        query.limit(1000);
+        query.limit(10000); // Updated limit to ensure all folders are fetched
         const results = await query.find();
         return results.map(parseObjectToJSON);
     },
