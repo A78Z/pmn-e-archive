@@ -54,6 +54,25 @@ export default function UploadPage() {
     }
   }, [profile]);
 
+  // Helper to safely get parent ID from various formats
+  const getParentId = (folder: any): string | null => {
+    if (!folder || !folder.parent_id) return null;
+
+    // If it's already a string
+    if (typeof folder.parent_id === 'string') {
+      return folder.parent_id;
+    }
+
+    // If it's a Parse Pointer or Object (has .id or .objectId)
+    if (typeof folder.parent_id === 'object') {
+      // Check for common ID fields
+      if (folder.parent_id.id) return folder.parent_id.id;
+      if (folder.parent_id.objectId) return folder.parent_id.objectId;
+    }
+
+    return null;
+  };
+
   // Helper to get full path of a folder
   const getFolderPath = (folderId: string, allFolders: any[]): string => {
     const folder = allFolders.find(f => f.id === folderId);
@@ -64,8 +83,13 @@ export default function UploadPage() {
     let current = folder;
     let depth = 0;
 
-    while (current.parent_id && depth < 10) {
-      const parent = allFolders.find(f => f.id === current.parent_id);
+    // Navigate up the tree
+    while (depth < 20) { // Increased depth limit to support deep archiving
+      const parentId = getParentId(current);
+
+      if (!parentId) break;
+
+      const parent = allFolders.find(f => f.id === parentId);
       if (parent) {
         parts.unshift(parent.name);
         current = parent;
