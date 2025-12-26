@@ -617,7 +617,7 @@ export default function UploadPage() {
               <SelectTrigger className="h-11">
                 <SelectValue placeholder="Racine (aucun dossier)" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="max-h-[40vh] overflow-y-auto">
                 <SelectItem value="root">Racine (aucun dossier)</SelectItem>
                 {folders.map(folder => (
                   <SelectItem key={folder.id} value={folder.id}>
