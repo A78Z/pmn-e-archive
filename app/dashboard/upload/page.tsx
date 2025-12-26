@@ -74,8 +74,8 @@ export default function UploadPage() {
   };
 
   // Helper to get full path of a folder
-  const getFolderPath = (folderId: string, allFolders: any[]): string => {
-    const folder = allFolders.find(f => f.id === folderId);
+  const getFolderPath = (folderId: string, folderMap: Map<string, any>): string => {
+    const folder = folderMap.get(folderId);
     if (!folder) return '';
 
     // Safety check for circular references or deep nesting
@@ -89,7 +89,7 @@ export default function UploadPage() {
 
       if (!parentId) break;
 
-      const parent = allFolders.find(f => f.id === parentId);
+      const parent = folderMap.get(parentId);
       if (parent) {
         parts.unshift(parent.name);
         current = parent;
@@ -119,11 +119,15 @@ export default function UploadPage() {
         ? await FolderHelpers.getAllForAdmin()
         : await FolderHelpers.getAllByUser(currentUser.id as string);
 
-      // Map folders with full path
+      // Create a Map for O(1) access to folders by ID
+      const folderMap = new Map();
+      data.forEach((f: any) => folderMap.set(f.id, f));
+
+      // Map folders with full path using the Map
       const options = data.map((f: any) => ({
         id: f.id,
         name: f.name,
-        path: getFolderPath(f.id, data)
+        path: getFolderPath(f.id, folderMap)
       })).sort((a: FolderOption, b: FolderOption) => a.path.localeCompare(b.path));
 
       setFolders(options);
