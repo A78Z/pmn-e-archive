@@ -26,9 +26,17 @@ import {
   List,
   Hash,
   FolderInput,
-  ArrowUpDown
+  ArrowUpDown,
+  ChevronsDown,
+  ChevronsUp,
+  Info,
+  Tags,
+  Archive as ArchiveIcon,
+  ArchiveRestore
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PropertiesPanel, PropertiesItem } from '@/components/properties-panel';
+import { CLASSIFICATION_PLAN } from '@/lib/classification-plan';
 import { useAuth } from '@/lib/parse-auth';
 import { FolderHelpers, DocumentHelpers, UserHelpers, ShareHelpers } from '@/lib/parse-helpers';
 import {
@@ -91,6 +99,10 @@ type Folder = {
   category?: string;
   status?: string;
   folder_number?: string;
+  // Classement (champs additifs, optionnels)
+  rubrique?: string;
+  mots_cles?: string[];
+  exercice?: string;
 };
 
 type Document = {
@@ -102,6 +114,11 @@ type Document = {
   folder_id?: string;
   createdAt: string;
   file?: any;
+  status?: string;
+  // Classement (champs additifs, optionnels)
+  rubrique?: string;
+  mots_cles?: string[];
+  exercice?: string;
 };
 
 const CATEGORIES = [
@@ -172,6 +189,27 @@ export default function DocumentsPage() {
   // ===== Compteurs de documents par dossier (count() léger, mis en cache) =====
   const [docCounts, setDocCounts] = useState<Record<string, number>>({});
   const countsInFlight = useRef<Set<string>>(new Set());
+
+  // ===== Panneau Propriétés / Classer =====
+  const [propertiesItem, setPropertiesItem] = useState<PropertiesItem | null>(null);
+  const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
+
+  // ===== Archiver / Désarchiver (avec confirmation) =====
+  const [statusToggleItem, setStatusToggleItem] = useState<PropertiesItem | null>(null);
+
+  // ===== Filtres additionnels (combinables avec la recherche) =====
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Archive' | 'Actif'>('all');
+  const [exerciceFilter, setExerciceFilter] = useState<string>('all');
+  const [rubriqueFilter, setRubriqueFilter] = useState<string>('all');
+
+  // ===== Recherche approfondie (requête serveur indépendante de l'arbre) =====
+  const SEARCH_PAGE_SIZE = 50;
+  const [searchResults, setSearchResults] = useState<{ folders: Folder[]; documents: Document[] } | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchSkip, setSearchSkip] = useState(0);
+  const [searchHasMore, setSearchHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const deepSearchActive = searchTerm.trim().length >= 2;
   const [isModifyNumberDialogOpen, setIsModifyNumberDialogOpen] = useState(false);
   const [newFolderNumber, setNewFolderNumber] = useState('');
 
@@ -268,6 +306,129 @@ export default function DocumentsPage() {
   // prioritaire) sinon cache de comptage.
   const getDocCount = (folderId: string): number | undefined =>
     docsByFolder[folderId]?.length ?? docCounts[folderId];
+
+  // Options des filtres de recherche approfondie (combinables)
+  const buildDeepSearchOptions = (skip: number) => ({
+    skip,
+    limit: SEARCH_PAGE_SIZE,
+    category: categoryFilter !== 'all' ? categoryFilter : undefined,
+    rubrique: rubriqueFilter !== 'all' ? rubriqueFilter : undefined,
+    exercice: exerciceFilter !== 'all' ? exerciceFilter : undefined,
+    status: statusFilter !== 'all' ? statusFilter : undefined,
+  });
+
+  // ===== Recherche approfondie : requête serveur débouncée (300 ms) =====
+  // Indépendante de l'arbre : ne recharge rien d'autre, lazy-loading intact.
+  useEffect(() => {
+    const term = searchTerm.trim();
+    if (term.length < 2) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const options = buildDeepSearchOptions(0);
+        const [folderResults, documentResults] = await Promise.all([
+          FolderHelpers.searchDeep(term, options),
+          DocumentHelpers.searchDeep(term, options),
+        ]);
+        setSearchResults({
+          folders: folderResults as Folder[],
+          documents: documentResults as Document[],
+        });
+        setSearchSkip(SEARCH_PAGE_SIZE);
+        setSearchHasMore(
+          folderResults.length === SEARCH_PAGE_SIZE || documentResults.length === SEARCH_PAGE_SIZE
+        );
+      } catch (error: any) {
+        console.error('Deep search error:', error);
+        toast.error(`Erreur lors de la recherche${error?.message ? ` : ${error.message}` : ''}`);
+        setSearchResults({ folders: [], documents: [] });
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, categoryFilter, rubriqueFilter, exerciceFilter, statusFilter]);
+
+  // Page suivante des résultats de recherche
+  const loadMoreSearchResults = async () => {
+    const term = searchTerm.trim();
+    if (term.length < 2 || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const options = buildDeepSearchOptions(searchSkip);
+      const [folderResults, documentResults] = await Promise.all([
+        FolderHelpers.searchDeep(term, options),
+        DocumentHelpers.searchDeep(term, options),
+      ]);
+      setSearchResults(prev => prev ? {
+        folders: [...prev.folders, ...(folderResults as Folder[])],
+        documents: [...prev.documents, ...(documentResults as Document[])],
+      } : { folders: folderResults as Folder[], documents: documentResults as Document[] });
+      setSearchSkip(prev => prev + SEARCH_PAGE_SIZE);
+      setSearchHasMore(
+        folderResults.length === SEARCH_PAGE_SIZE || documentResults.length === SEARCH_PAGE_SIZE
+      );
+    } catch (error: any) {
+      toast.error(`Erreur lors du chargement des résultats${error?.message ? ` : ${error.message}` : ''}`);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Depuis un résultat de recherche : révèle l'élément dans l'arbre
+  // (déplie tous les ancêtres + le dossier, charge son contenu à la volée).
+  const revealInTree = (folderId: string | null | undefined) => {
+    setSearchTerm('');
+    if (!folderId) return;
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      let current = folders.find(f => f.id === folderId);
+      next.add(folderId);
+      while (current?.parent_id) {
+        next.add(current.parent_id);
+        current = folders.find(f => f.id === current!.parent_id);
+      }
+      return next;
+    });
+    fetchFolderDocuments(folderId);
+  };
+
+  // ===== « Tout développer » : chargement PROGRESSIF du contenu =====
+  // Les dossiers dépliés sans contenu en cache sont chargés par lots de 4
+  // (chargement par dossier respecté — jamais de requête massive).
+  useEffect(() => {
+    const pending = Array.from(expandedFolders)
+      .filter(id =>
+        docsByFolder[id] === undefined &&
+        !loadingFolderIds.has(id) &&
+        !folderErrors[id] &&
+        folders.some(f => f.id === id)
+      )
+      .slice(0, 4);
+    pending.forEach(id => fetchFolderDocuments(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedFolders, docsByFolder, loadingFolderIds, folders]);
+
+  const expandAll = () => {
+    setExpandedFolders(new Set(folders.map(f => f.id)));
+  };
+
+  const collapseAll = () => {
+    setExpandedFolders(new Set());
+  };
+
+  // Chemin d'un élément pour la liste de résultats (fil d'Ariane)
+  const getResultPath = (parentFolderId: string | null | undefined): string => {
+    if (!parentFolderId) return 'Racine';
+    return getFolderPath(parentFolderId) || 'Racine';
+  };
 
   const handleViewModeChange = (mode: 'list' | 'large' | 'very-large') => {
     setViewMode(mode);
@@ -990,6 +1151,72 @@ export default function DocumentsPage() {
     }
   };
 
+  // ===== Propriétés / Classer =====
+  const openProperties = (type: 'folder' | 'document', data: any) => {
+    setPropertiesItem({ type, data });
+    setIsPropertiesOpen(true);
+  };
+
+  const handlePropertiesSaved = (type: 'folder' | 'document', updated: any) => {
+    if (type === 'folder') {
+      fetchFolders();
+    } else {
+      refreshDocumentContainer(updated?.folder_id ?? propertiesItem?.data?.folder_id ?? null);
+    }
+  };
+
+  // ===== Archiver / Désarchiver =====
+  const requestStatusToggle = (type: 'folder' | 'document', data: any) => {
+    if (!canRename(profile, data)) {
+      toast.error("Vous n'avez pas la permission de modifier cet élément");
+      return;
+    }
+    setStatusToggleItem({ type, data });
+  };
+
+  const confirmStatusToggle = async () => {
+    if (!statusToggleItem) return;
+    const { type, data } = statusToggleItem;
+    const newStatus = data.status === 'Archive' ? 'Actif' : 'Archive';
+    setStatusToggleItem(null);
+    try {
+      if (type === 'folder') {
+        await FolderHelpers.update(data.id, { status: newStatus });
+        fetchFolders();
+      } else {
+        await DocumentHelpers.update(data.id, { status: newStatus });
+        refreshDocumentContainer(data.folder_id ?? null);
+      }
+      toast.success(
+        newStatus === 'Archive'
+          ? `« ${data.name} » archivé`
+          : `« ${data.name} » désarchivé`
+      );
+    } catch (error: any) {
+      console.error('Error toggling status:', error);
+      toast.error(`Erreur lors du changement de statut${error?.message ? ` : ${error.message}` : ''}`);
+    }
+  };
+
+  // Filtres additionnels (statut / exercice / rubrique) — affichage uniquement
+  const matchesExtraFilters = (item: { status?: string; exercice?: string; rubrique?: string }): boolean => {
+    if (statusFilter === 'Archive' && item.status !== 'Archive') return false;
+    if (statusFilter === 'Actif' && item.status === 'Archive') return false;
+    if (exerciceFilter !== 'all' && String(item.exercice ?? '') !== exerciceFilter) return false;
+    if (rubriqueFilter !== 'all' && item.rubrique !== rubriqueFilter) return false;
+    return true;
+  };
+
+  // Années présentes dans les données chargées (pour le filtre Exercice)
+  const exerciceOptions = Array.from(
+    new Set(
+      [...folders, ...documents, ...Object.values(docsByFolder).flat()]
+        .map(item => item.exercice)
+        .filter(Boolean)
+        .map(String)
+    )
+  ).sort().reverse();
+
   // Comparateur de tri (affichage uniquement, aucune écriture)
   const compareItems = (a: { name: string; createdAt: string }, b: { name: string; createdAt: string }): number => {
     switch (sortBy) {
@@ -1031,7 +1258,7 @@ export default function DocumentsPage() {
       const matchesSearch = folder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         folder.folder_number?.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = categoryFilter === 'all' || folder.category === categoryFilter;
-      return matchesSearch && matchesCategory && !folder.parent_id;
+      return matchesSearch && matchesCategory && matchesExtraFilters(folder) && !folder.parent_id;
     })
     .sort(compareItems);
 
@@ -1039,7 +1266,7 @@ export default function DocumentsPage() {
     .filter(doc => {
       const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase());
       const matchesCategory = categoryFilter === 'all' || doc.category === categoryFilter;
-      return matchesSearch && matchesCategory && !doc.folder_id;
+      return matchesSearch && matchesCategory && matchesExtraFilters(doc) && !doc.folder_id;
     })
     .sort(compareItems);
 
@@ -1114,13 +1341,36 @@ export default function DocumentsPage() {
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    setSelectedFolder(folder);
-                    setIsPreviewDialogOpen(true);
+                    openProperties('folder', folder);
                   }}
                   className="whitespace-nowrap cursor-pointer"
                 >
-                  <Eye className="h-4 w-4 mr-2" />
-                  Prévisualiser
+                  <Info className="h-4 w-4 mr-2" />
+                  Propriétés / Détails
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openProperties('folder', folder);
+                  }}
+                  className="whitespace-nowrap cursor-pointer"
+                >
+                  <Tags className="h-4 w-4 mr-2" />
+                  Classer
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestStatusToggle('folder', folder);
+                  }}
+                  disabled={!canRename(profile, folder)}
+                  className="whitespace-nowrap cursor-pointer"
+                >
+                  {folder.status === 'Archive' ? (
+                    <><ArchiveRestore className="h-4 w-4 mr-2" />Désarchiver</>
+                  ) : (
+                    <><ArchiveIcon className="h-4 w-4 mr-2" />Archiver</>
+                  )}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={(e) => {
@@ -1275,6 +1525,30 @@ export default function DocumentsPage() {
                       <DropdownMenuItem
                         onClick={(e) => {
                           e.stopPropagation();
+                          openProperties('document', doc);
+                        }}
+                        className="whitespace-nowrap cursor-pointer"
+                      >
+                        <Info className="h-4 w-4 mr-2" />
+                        Propriétés / Classer
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          requestStatusToggle('document', doc);
+                        }}
+                        disabled={!canRename(profile, doc)}
+                        className="whitespace-nowrap cursor-pointer"
+                      >
+                        {doc.status === 'Archive' ? (
+                          <><ArchiveRestore className="h-4 w-4 mr-2" />Désarchiver</>
+                        ) : (
+                          <><ArchiveIcon className="h-4 w-4 mr-2" />Archiver</>
+                        )}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setSelectedDocument(doc);
                           setIsShareDialogOpen(true);
                         }}
@@ -1378,7 +1652,8 @@ export default function DocumentsPage() {
       </div>
 
       {/* Search and Actions */}
-      <div className="surface flex flex-col items-center gap-3 p-3.5 md:flex-row">
+      <div className="surface space-y-3 p-3.5">
+      <div className="flex flex-col items-center gap-3 md:flex-row">
         <div className="relative w-full min-w-0 flex-1 md:min-w-[240px]">
           <Search className="absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-pmn-faint" strokeWidth={2} />
           <Input
@@ -1461,8 +1736,217 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* Content */}
-      {filteredFolders.length === 0 && filteredDocuments.length === 0 ? (
+      {/* Rangée 2 : filtres combinables + développer/réduire */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-[rgba(20,33,28,.06)] pt-3">
+        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+          <SelectTrigger className="h-9 w-[130px] rounded-[9px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] text-[13px] font-medium text-pmn-text2">
+            <SelectValue placeholder="Statut" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous statuts</SelectItem>
+            <SelectItem value="Archive">Archivé</SelectItem>
+            <SelectItem value="Actif">Actif</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={exerciceFilter} onValueChange={setExerciceFilter}>
+          <SelectTrigger className="h-9 w-[140px] rounded-[9px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] text-[13px] font-medium text-pmn-text2">
+            <SelectValue placeholder="Exercice" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Tous exercices</SelectItem>
+            {exerciceOptions.map(year => (
+              <SelectItem key={year} value={year}>{year}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={rubriqueFilter} onValueChange={setRubriqueFilter}>
+          <SelectTrigger className="h-9 w-[220px] rounded-[9px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] text-[13px] font-medium text-pmn-text2">
+            <SelectValue placeholder="Rubrique" />
+          </SelectTrigger>
+          <SelectContent className="max-h-[280px]">
+            <SelectItem value="all">Toutes rubriques</SelectItem>
+            {CLASSIFICATION_PLAN.map(r => (
+              <SelectItem key={r.code} value={r.code}>{r.code} – {r.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {(statusFilter !== 'all' || exerciceFilter !== 'all' || rubriqueFilter !== 'all') && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-9 text-[13px] text-pmn-subtle hover:text-pmn-ink"
+            onClick={() => {
+              setStatusFilter('all');
+              setExerciceFilter('all');
+              setRubriqueFilter('all');
+            }}
+          >
+            Réinitialiser
+          </Button>
+        )}
+        <div className="flex-1" />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={expandAll}
+          className="h-9 gap-1.5 rounded-[9px] border-pmn-green/25 text-[13px] font-medium text-pmn-green hover:bg-pmn-green/[.06] hover:text-pmn-green"
+        >
+          <ChevronsDown className="h-4 w-4" />
+          Tout développer
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={collapseAll}
+          className="h-9 gap-1.5 rounded-[9px] border-[rgba(20,33,28,.1)] text-[13px] font-medium text-pmn-subtle hover:bg-pmn-hover"
+        >
+          <ChevronsUp className="h-4 w-4" />
+          Tout réduire
+        </Button>
+      </div>
+      </div>
+
+      {/* ===== Résultats de recherche approfondie (liste plate, chemins complets) ===== */}
+      {deepSearchActive ? (
+        <div className="surface overflow-hidden p-0">
+          <div className="flex items-center justify-between border-b border-border px-[18px] py-3.5">
+            <p className="text-sm font-semibold text-pmn-ink">
+              {searching ? (
+                <span className="flex items-center gap-2 text-pmn-subtle">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Recherche en cours…
+                </span>
+              ) : (
+                <>
+                  {(searchResults?.folders.length ?? 0) + (searchResults?.documents.length ?? 0)}
+                  {searchHasMore ? '+' : ''} résultat(s) pour « {searchTerm.trim()} »
+                  <span className="ml-2 font-normal text-pmn-faint">— toute l&apos;arborescence</span>
+                </>
+              )}
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-[13px] text-pmn-subtle hover:text-pmn-ink"
+              onClick={() => setSearchTerm('')}
+            >
+              Effacer
+            </Button>
+          </div>
+
+          {searching && !searchResults ? (
+            <div>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 border-b border-[rgba(20,33,28,.055)] px-[18px] py-[11px]">
+                  <Skeleton className="h-10 w-10 rounded-[9px]" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-[45%] rounded" />
+                    <Skeleton className="h-3 w-[30%] rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {(searchResults?.folders.length ?? 0) === 0 && (searchResults?.documents.length ?? 0) === 0 ? (
+                <div className="px-[18px] py-10 text-center text-sm text-pmn-faint">
+                  Aucun résultat pour « {searchTerm.trim()} »
+                  {(statusFilter !== 'all' || exerciceFilter !== 'all' || rubriqueFilter !== 'all' || categoryFilter !== 'all') &&
+                    ' avec les filtres actifs'}
+                </div>
+              ) : (
+                <div className="divide-y divide-[rgba(20,33,28,.055)]">
+                  {/* Dossiers trouvés */}
+                  {searchResults?.folders.map(folder => (
+                    <button
+                      key={`sf-${folder.id}`}
+                      onClick={() => revealInTree(folder.id)}
+                      className="flex w-full items-center gap-3 px-[18px] py-[10px] text-left transition-colors hover:bg-pmn-hover"
+                    >
+                      <FolderGlyph size={36} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-[9px]">
+                          {folder.folder_number && (
+                            <span className="flex-none rounded-[5px] border border-[rgba(20,33,28,.06)] bg-[#F1F0EB] px-1.5 py-0.5 font-mono text-[11px] text-pmn-faint2">
+                              {folder.folder_number}
+                            </span>
+                          )}
+                          <span className="truncate text-[14.5px] font-semibold text-pmn-ink">{folder.name}</span>
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-pmn-faint">
+                          📁 {getResultPath(folder.parent_id)}
+                        </p>
+                      </div>
+                      <div className="flex flex-none items-center gap-1.5">
+                        {folder.rubrique && (
+                          <span className="rounded-[20px] bg-pmn-green/[.08] px-2 py-0.5 text-[11px] font-semibold text-pmn-green">
+                            {folder.rubrique}
+                          </span>
+                        )}
+                        {folder.category && (
+                          <span className="hidden rounded-[20px] bg-pmn-gold/[.14] px-2 py-0.5 text-[11px] font-semibold text-pmn-gold-dark sm:inline">
+                            {folder.category}
+                          </span>
+                        )}
+                        <span className="hidden text-xs text-pmn-faint md:inline">
+                          {format(new Date(folder.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+
+                  {/* Documents trouvés */}
+                  {searchResults?.documents.map(doc => (
+                    <button
+                      key={`sd-${doc.id}`}
+                      onClick={() => revealInTree(doc.folder_id ?? null)}
+                      className="flex w-full items-center gap-3 px-[18px] py-[10px] text-left transition-colors hover:bg-pmn-hover"
+                    >
+                      <FileTile name={doc.name} size={36} />
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate text-[14.5px] font-semibold text-pmn-ink">{doc.name}</span>
+                        <p className="mt-0.5 truncate text-xs text-pmn-faint">
+                          📁 {getResultPath(doc.folder_id)}
+                        </p>
+                      </div>
+                      <div className="flex flex-none items-center gap-1.5">
+                        {doc.rubrique && (
+                          <span className="rounded-[20px] bg-pmn-green/[.08] px-2 py-0.5 text-[11px] font-semibold text-pmn-green">
+                            {doc.rubrique}
+                          </span>
+                        )}
+                        {doc.category && (
+                          <span className="hidden rounded-[20px] bg-pmn-gold/[.14] px-2 py-0.5 text-[11px] font-semibold text-pmn-gold-dark sm:inline">
+                            {doc.category}
+                          </span>
+                        )}
+                        <span className="hidden text-xs text-pmn-faint md:inline">
+                          {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+
+                  {/* Pagination */}
+                  {searchHasMore && (
+                    <div className="flex justify-center px-[18px] py-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={loadingMore}
+                        onClick={loadMoreSearchResults}
+                        className="h-9 rounded-[9px] border-pmn-green/25 text-[13px] font-medium text-pmn-green hover:bg-pmn-green/[.06] hover:text-pmn-green"
+                      >
+                        {loadingMore && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Afficher plus de résultats
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : filteredFolders.length === 0 && filteredDocuments.length === 0 ? (
         <div className="surface p-12">
           <div className="text-center">
             <div className="mx-auto mb-4 flex h-[72px] w-[72px] items-center justify-center rounded-[20px] bg-pmn-green/[.09] text-pmn-green">
@@ -2207,6 +2691,58 @@ export default function DocumentsPage() {
             </Button>
             <Button onClick={handleMoveDocument} className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110">
               Déplacer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== Panneau Propriétés / Classer ===== */}
+      <PropertiesPanel
+        open={isPropertiesOpen}
+        onOpenChange={(open) => {
+          setIsPropertiesOpen(open);
+          if (!open) setPropertiesItem(null);
+        }}
+        item={propertiesItem}
+        canEdit={propertiesItem ? canRename(profile, propertiesItem.data) : false}
+        isAdmin={['admin', 'super_admin'].includes(profile?.role || '')}
+        onSaved={handlePropertiesSaved}
+      />
+
+      {/* ===== Confirmation Archiver / Désarchiver ===== */}
+      <Dialog
+        open={statusToggleItem !== null}
+        onOpenChange={(open) => {
+          if (!open) setStatusToggleItem(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center text-pmn-green">
+              {statusToggleItem?.data?.status === 'Archive' ? (
+                <><ArchiveRestore className="h-5 w-5 mr-2" />Désarchiver ?</>
+              ) : (
+                <><ArchiveIcon className="h-5 w-5 mr-2" />Archiver ?</>
+              )}
+            </DialogTitle>
+            <DialogDescription className="break-words pt-2">
+              {statusToggleItem?.data?.status === 'Archive' ? (
+                <>Rendre <strong className="break-all text-pmn-ink">« {statusToggleItem?.data?.name} »</strong> actif ?</>
+              ) : (
+                <>Marquer <strong className="break-all text-pmn-ink">« {statusToggleItem?.data?.name} »</strong> comme archivé ?</>
+              )}
+              {' '}Seul le statut de cet élément sera modifié.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStatusToggleItem(null)}>
+              Annuler
+            </Button>
+            <Button
+              onClick={confirmStatusToggle}
+              className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110"
+            >
+              Confirmer
             </Button>
           </DialogFooter>
         </DialogContent>

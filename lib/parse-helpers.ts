@@ -6,6 +6,31 @@ import { Parse, ParseClasses, parseObjectToJSON, handleParseError } from './pars
  * Helper functions for common Parse operations
  */
 
+/** Échappe les caractères spéciaux d'une chaîne pour un usage en RegExp. */
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Options communes de la recherche approfondie. */
+export interface DeepSearchOptions {
+    skip?: number;
+    limit?: number;
+    category?: string;
+    rubrique?: string;
+    exercice?: string;
+    /** 'Archive' → statut Archivé uniquement ; 'Actif' → tout sauf Archivé */
+    status?: 'Archive' | 'Actif';
+}
+
+/** Applique les filtres combinables (catégorie/rubrique/exercice/statut) à une requête. */
+const applyDeepSearchFilters = (query: Parse.Query, options: DeepSearchOptions) => {
+    if (options.category) query.equalTo('category', options.category);
+    if (options.rubrique) query.equalTo('rubrique', options.rubrique);
+    if (options.exercice) query.equalTo('exercice', options.exercice);
+    if (options.status === 'Archive') query.equalTo('status', 'Archive');
+    else if (options.status === 'Actif') query.notEqualTo('status', 'Archive');
+    query.skip(options.skip ?? 0);
+    query.limit(options.limit ?? 50);
+};
+
 // Document helpers
 export const DocumentHelpers = {
     async getAll() {
@@ -108,6 +133,30 @@ export const DocumentHelpers = {
         const query = new Parse.Query(ParseClasses.DOCUMENT);
         query.equalTo('folder_id', folderId);
         return await query.count();
+    },
+
+    /**
+     * Recherche approfondie côté serveur (toute l'arborescence, casse-insensible) :
+     * nom, catégorie, rubrique (regex i) + mot-clé exact (tableau mots_cles).
+     * Requête indépendante : ne recharge pas l'arbre, ne casse pas le lazy-loading.
+     */
+    async searchDeep(term: string, options: DeepSearchOptions = {}) {
+        const regex = new RegExp(escapeRegex(term), 'i');
+
+        const byName = new Parse.Query(ParseClasses.DOCUMENT);
+        byName.matches('name', regex);
+        const byCategory = new Parse.Query(ParseClasses.DOCUMENT);
+        byCategory.matches('category', regex);
+        const byRubrique = new Parse.Query(ParseClasses.DOCUMENT);
+        byRubrique.matches('rubrique', regex);
+        const byTag = new Parse.Query(ParseClasses.DOCUMENT);
+        byTag.equalTo('mots_cles', term); // correspondance exacte d'un tag
+
+        const query = Parse.Query.or(byName, byCategory, byRubrique, byTag);
+        applyDeepSearchFilters(query, options);
+        query.descending('createdAt');
+        const results = await query.find();
+        return results.map(parseObjectToJSON);
     },
 };
 
@@ -305,6 +354,31 @@ export const FolderHelpers = {
         query.equalTo('parent_id', parentId);
         query.ascending('name');
         query.limit(10000); // Updated limit to ensure all folders are fetched
+        const results = await query.find();
+        return results.map(parseObjectToJSON);
+    },
+
+    /**
+     * Recherche approfondie côté serveur sur les dossiers :
+     * nom, cote (folder_number), catégorie, rubrique (regex i) + mot-clé exact.
+     */
+    async searchDeep(term: string, options: DeepSearchOptions = {}) {
+        const regex = new RegExp(escapeRegex(term), 'i');
+
+        const byName = new Parse.Query(ParseClasses.FOLDER);
+        byName.matches('name', regex);
+        const byNumber = new Parse.Query(ParseClasses.FOLDER);
+        byNumber.matches('folder_number', regex);
+        const byCategory = new Parse.Query(ParseClasses.FOLDER);
+        byCategory.matches('category', regex);
+        const byRubrique = new Parse.Query(ParseClasses.FOLDER);
+        byRubrique.matches('rubrique', regex);
+        const byTag = new Parse.Query(ParseClasses.FOLDER);
+        byTag.equalTo('mots_cles', term); // correspondance exacte d'un tag
+
+        const query = Parse.Query.or(byName, byNumber, byCategory, byRubrique, byTag);
+        applyDeepSearchFilters(query, options);
+        query.ascending('name');
         const results = await query.find();
         return results.map(parseObjectToJSON);
     },
