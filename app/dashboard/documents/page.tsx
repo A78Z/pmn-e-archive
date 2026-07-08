@@ -264,8 +264,15 @@ export default function DocumentsPage() {
   };
 
   // Compteurs de documents : count() léger pour les dossiers actuellement
-  // rendus (racine + enfants des dossiers dépliés), par lots de 8, avec cache.
+  // rendus (racine + enfants des dossiers dépliés), par lots, avec cache.
   // Aucun chargement massif : seuls des comptages sont demandés.
+  //
+  // ⚠️ ANTI-BOUCLE : un comptage qui échoue (limite de débit, réseau…) est
+  // mémorisé dans countsFailed et n'est JAMAIS retenté automatiquement, et
+  // setDocCounts n'est appelé que s'il y a réellement de nouvelles valeurs.
+  // (Sans ces gardes : échec → nouvel état → re-déclenchement → re-échec →
+  // boucle infinie « Maximum update depth exceeded ».)
+  const countsFailed = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (folders.length === 0) return;
 
@@ -274,9 +281,10 @@ export default function DocumentsPage() {
       .filter(f =>
         docCounts[f.id] === undefined &&
         docsByFolder[f.id] === undefined &&
-        !countsInFlight.current.has(f.id)
+        !countsInFlight.current.has(f.id) &&
+        !countsFailed.current.has(f.id)
       )
-      .slice(0, 8);
+      .slice(0, 6);
 
     if (need.length === 0) return;
 
@@ -286,19 +294,24 @@ export default function DocumentsPage() {
         try {
           return [f.id, await DocumentHelpers.countByFolder(f.id)] as const;
         } catch (e) {
-          console.warn(`countByFolder(${f.id}) failed:`, e);
+          console.warn(`countByFolder(${f.id}) failed (ne sera pas retenté):`, e);
+          countsFailed.current.add(f.id);
           return [f.id, undefined] as const;
         }
       })
     ).then(results => {
-      setDocCounts(prev => {
-        const next = { ...prev };
-        results.forEach(([id, count]) => {
-          if (count !== undefined) next[id] = count;
-        });
-        return next;
-      });
       results.forEach(([id]) => countsInFlight.current.delete(id));
+      const defined = results.filter(([, count]) => count !== undefined);
+      // Ne changer l'état QUE si de nouvelles valeurs existent (anti-boucle)
+      if (defined.length > 0) {
+        setDocCounts(prev => {
+          const next = { ...prev };
+          defined.forEach(([id, count]) => {
+            next[id] = count as number;
+          });
+          return next;
+        });
+      }
     });
   }, [folders, expandedFolders, docCounts, docsByFolder]);
 
