@@ -414,9 +414,22 @@ export default function DocumentsPage() {
   };
 
   // ===== « Tout développer » : chargement PROGRESSIF du contenu =====
-  // Les dossiers dépliés sans contenu en cache sont chargés par lots de 4
-  // (chargement par dossier respecté — jamais de requête massive).
+  // Les dossiers dépliés sans contenu en cache sont chargés avec un PLAFOND
+  // DE CONCURRENCE de 4 (chargement par dossier respecté — jamais massif).
+  //
+  // ⚠️ ANTI-BOUCLE (cause du crash « Maximum update depth exceeded ») :
+  // sans le plafond ci-dessous, chaque setLoadingFolderIds re-déclenchait
+  // cet effet de façon SYNCHRONE, qui lançait aussitôt les 4 dossiers
+  // suivants, etc. Avec 490 dossiers dépliés : ~123 mises à jour d'état
+  // imbriquées dans le même cycle → React coupe à 50 et crashe.
+  // Le plafond garantit : quand 4 chargements sont en vol, l'effet
+  // re-déclenché NE CHANGE AUCUN ÉTAT (cascade synchrone stoppée) ;
+  // la suite ne part qu'aux complétions (asynchrones).
   useEffect(() => {
+    const MAX_CONCURRENT = 4;
+    const freeSlots = MAX_CONCURRENT - loadingFolderIds.size;
+    if (freeSlots <= 0) return;
+
     const pending = Array.from(expandedFolders)
       .filter(id =>
         docsByFolder[id] === undefined &&
@@ -424,7 +437,7 @@ export default function DocumentsPage() {
         !folderErrors[id] &&
         folders.some(f => f.id === id)
       )
-      .slice(0, 4);
+      .slice(0, freeSlots);
     pending.forEach(id => fetchFolderDocuments(id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expandedFolders, docsByFolder, loadingFolderIds, folders]);

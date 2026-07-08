@@ -37,6 +37,144 @@ const CRUMBS: Record<string, string> = {
   '/dashboard/cleanup': 'Nettoyage',
 };
 
+const getInitials = (name: string) => {
+  return name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || 'U';
+};
+
+// ⚠️ Composants définis AU NIVEAU MODULE (et non dans le corps du composant) :
+// sinon leur identité change à chaque render → React démonte/remonte tout le
+// sous-arbre (sidebar) à chaque rafraîchissement des compteurs (30 s), ce qui
+// fait osciller les refs Radix (churn setRef) et dégrade les performances.
+
+function NavButton({
+  icon: Icon,
+  label,
+  href,
+  badge,
+  active,
+  onNavigate,
+}: {
+  icon: any;
+  label: string;
+  href: string;
+  badge: number | null;
+  active: boolean;
+  onNavigate: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onNavigate}
+      className={cn(
+        'flex items-center gap-3 rounded-[11px] px-[13px] py-[11px] text-sm font-medium text-[#E7F1EB] transition-colors duration-150 border-l-[3px]',
+        active
+          ? 'border-l-[#E4B429] bg-[rgba(228,180,41,.16)]'
+          : 'border-l-transparent hover:bg-[rgba(255,255,255,.06)]'
+      )}
+    >
+      <Icon className="h-[19px] w-[19px]" strokeWidth={1.9} />
+      <span className="flex-1">{label}</span>
+      {badge !== null && badge > 0 && (
+        <span className="flex h-5 min-w-[20px] items-center justify-center rounded-[10px] bg-[#E4B429] px-1.5 text-[11px] font-extrabold text-[#3A2A00]">
+          {badge}
+        </span>
+      )}
+    </Link>
+  );
+}
+
+function SidebarInner({
+  profile,
+  roleLabel,
+  pathname,
+  mainItems,
+  onNavigate,
+  onSignOut,
+}: {
+  profile: any;
+  roleLabel: string;
+  pathname: string;
+  mainItems: { icon: any; label: string; href: string; badge: number | null }[];
+  onNavigate: () => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <>
+      {/* marque */}
+      <div className="relative flex items-center gap-[13px] border-b border-white/[.07] px-5 py-5">
+        <div className="flex h-[46px] w-[46px] flex-none items-center justify-center overflow-hidden rounded-xl bg-white shadow-[0_2px_8px_rgba(0,0,0,.25)]">
+          <Image src="/assets/pmn-logo.png" alt="PMN" width={44} height={44} className="object-contain" />
+        </div>
+        <div className="min-w-0 leading-tight">
+          <div className="font-display text-[19px] font-semibold tracking-[.2px]">Archive PMN</div>
+          <div className="text-[11.5px] font-semibold tracking-[.3px] text-[#E4B429]">
+            Plateforme numérique
+          </div>
+        </div>
+      </div>
+
+      {/* navigation */}
+      <nav className="relative flex flex-1 flex-col gap-[3px] overflow-y-auto px-3.5 pb-2.5 pt-4">
+        <div className="px-3 pb-2 pt-1.5 text-[10.5px] font-bold tracking-[.14em] text-[#EAF3EE]/[.42]">
+          MENU PRINCIPAL
+        </div>
+        {mainItems.map((item) => (
+          <NavButton
+            key={item.href}
+            {...item}
+            active={pathname === item.href}
+            onNavigate={onNavigate}
+          />
+        ))}
+
+        {profile && ['admin', 'super_admin'].includes(profile.role) && (
+          <>
+            <div className="px-3 pb-2 pt-4 text-[10.5px] font-bold tracking-[.14em] text-[#EAF3EE]/[.42]">
+              ADMINISTRATION
+            </div>
+            <NavButton
+              icon={Settings}
+              label="Administration"
+              href="/dashboard/administration"
+              badge={null}
+              active={pathname === '/dashboard/administration'}
+              onNavigate={onNavigate}
+            />
+            {profile.role === 'super_admin' && (
+              <NavButton
+                icon={Users}
+                label="Gestion Utilisateurs"
+                href="/dashboard/users"
+                badge={null}
+                active={pathname === '/dashboard/users'}
+                onNavigate={onNavigate}
+              />
+            )}
+          </>
+        )}
+      </nav>
+
+      {/* utilisateur */}
+      <div className="relative flex items-center gap-3 border-t border-white/[.08] px-4 py-3.5">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-br from-[#E4B429] to-[#C7961A] text-[15px] font-extrabold text-[#3A2A00]">
+          {getInitials(profile?.full_name || 'User')}
+        </div>
+        <div className="min-w-0 flex-1 leading-tight">
+          <div className="truncate text-[13.5px] font-semibold">{profile?.full_name || 'Utilisateur'}</div>
+          <div className="truncate text-[11.5px] text-[#EAF3EE]/60">{roleLabel}</div>
+        </div>
+        <button
+          title="Déconnexion"
+          onClick={onSignOut}
+          className="flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-[#EAF3EE]/70 transition-colors hover:bg-white/[.08] hover:text-white"
+        >
+          <LogOut className="h-[18px] w-[18px]" strokeWidth={1.9} />
+        </button>
+      </div>
+    </>
+  );
+}
+
 function DashboardContent({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -104,10 +242,6 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const getInitials = (name: string) => {
-    return name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || 'U';
-  };
-
   const roleLabel =
     profile?.role === 'super_admin'
       ? 'Super Administrateur'
@@ -126,96 +260,16 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     { icon: ShieldCheck, label: "Demandes d'accès", href: '/dashboard/access-requests', badge: requestCount },
   ];
 
-  const NavButton = ({
-    icon: Icon,
-    label,
-    href,
-    badge,
-  }: {
-    icon: any;
-    label: string;
-    href: string;
-    badge: number | null;
-  }) => {
-    const active = pathname === href;
-    return (
-      <Link
-        href={href}
-        onClick={() => setMobileOpen(false)}
-        className={cn(
-          'flex items-center gap-3 rounded-[11px] px-[13px] py-[11px] text-sm font-medium text-[#E7F1EB] transition-colors duration-150 border-l-[3px]',
-          active
-            ? 'border-l-[#E4B429] bg-[rgba(228,180,41,.16)]'
-            : 'border-l-transparent hover:bg-[rgba(255,255,255,.06)]'
-        )}
-      >
-        <Icon className="h-[19px] w-[19px]" strokeWidth={1.9} />
-        <span className="flex-1">{label}</span>
-        {badge !== null && badge > 0 && (
-          <span className="flex h-5 min-w-[20px] items-center justify-center rounded-[10px] bg-[#E4B429] px-1.5 text-[11px] font-extrabold text-[#3A2A00]">
-            {badge}
-          </span>
-        )}
-      </Link>
-    );
+  const closeMobile = useCallback(() => setMobileOpen(false), []);
+
+  const sidebarProps = {
+    profile,
+    roleLabel,
+    pathname,
+    mainItems,
+    onNavigate: closeMobile,
+    onSignOut: handleSignOut,
   };
-
-  const SidebarInner = () => (
-    <>
-      {/* marque */}
-      <div className="relative flex items-center gap-[13px] border-b border-white/[.07] px-5 py-5">
-        <div className="flex h-[46px] w-[46px] flex-none items-center justify-center overflow-hidden rounded-xl bg-white shadow-[0_2px_8px_rgba(0,0,0,.25)]">
-          <Image src="/assets/pmn-logo.png" alt="PMN" width={44} height={44} className="object-contain" />
-        </div>
-        <div className="min-w-0 leading-tight">
-          <div className="font-display text-[19px] font-semibold tracking-[.2px]">Archive PMN</div>
-          <div className="text-[11.5px] font-semibold tracking-[.3px] text-[#E4B429]">
-            Plateforme numérique
-          </div>
-        </div>
-      </div>
-
-      {/* navigation */}
-      <nav className="relative flex flex-1 flex-col gap-[3px] overflow-y-auto px-3.5 pb-2.5 pt-4">
-        <div className="px-3 pb-2 pt-1.5 text-[10.5px] font-bold tracking-[.14em] text-[#EAF3EE]/[.42]">
-          MENU PRINCIPAL
-        </div>
-        {mainItems.map((item) => (
-          <NavButton key={item.href} {...item} />
-        ))}
-
-        {profile && ['admin', 'super_admin'].includes(profile.role) && (
-          <>
-            <div className="px-3 pb-2 pt-4 text-[10.5px] font-bold tracking-[.14em] text-[#EAF3EE]/[.42]">
-              ADMINISTRATION
-            </div>
-            <NavButton icon={Settings} label="Administration" href="/dashboard/administration" badge={null} />
-            {profile.role === 'super_admin' && (
-              <NavButton icon={Users} label="Gestion Utilisateurs" href="/dashboard/users" badge={null} />
-            )}
-          </>
-        )}
-      </nav>
-
-      {/* utilisateur */}
-      <div className="relative flex items-center gap-3 border-t border-white/[.08] px-4 py-3.5">
-        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-br from-[#E4B429] to-[#C7961A] text-[15px] font-extrabold text-[#3A2A00]">
-          {getInitials(profile?.full_name || 'User')}
-        </div>
-        <div className="min-w-0 flex-1 leading-tight">
-          <div className="truncate text-[13.5px] font-semibold">{profile?.full_name || 'Utilisateur'}</div>
-          <div className="truncate text-[11.5px] text-[#EAF3EE]/60">{roleLabel}</div>
-        </div>
-        <button
-          title="Déconnexion"
-          onClick={handleSignOut}
-          className="flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-[#EAF3EE]/70 transition-colors hover:bg-white/[.08] hover:text-white"
-        >
-          <LogOut className="h-[18px] w-[18px]" strokeWidth={1.9} />
-        </button>
-      </div>
-    </>
-  );
 
   if (loading) {
     return (
@@ -237,7 +291,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
       {/* ===== Sidebar desktop ===== */}
       <aside className="relative hidden w-[270px] flex-none flex-col text-[#EAF3EE] lg:flex bg-[linear-gradient(180deg,#0C3327_0%,#0F3D2E_55%,#0B2C22_100%)]">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_40%_at_100%_0%,rgba(228,180,41,.10),transparent_60%)]" />
-        <SidebarInner />
+        <SidebarInner {...sidebarProps} />
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -256,7 +310,7 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
                   side="left"
                   className="flex w-[270px] flex-col border-none p-0 text-[#EAF3EE] bg-[linear-gradient(180deg,#0C3327_0%,#0F3D2E_55%,#0B2C22_100%)]"
                 >
-                  <SidebarInner />
+                  <SidebarInner {...sidebarProps} />
                 </SheetContent>
               </Sheet>
             </div>
