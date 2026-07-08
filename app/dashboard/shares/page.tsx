@@ -150,7 +150,7 @@ export default function SharesPage() {
 
   const getFileIcon = (fileType: string) => {
     if (fileType?.includes('pdf')) return <FileText className="h-8 w-8 text-red-500" />;
-    if (fileType?.includes('image')) return <ImageIcon className="h-8 w-8 text-blue-500" />;
+    if (fileType?.includes('image')) return <ImageIcon className="h-8 w-8 text-pmn-green" />;
     return <File className="h-8 w-8 text-gray-500" />;
   };
 
@@ -294,7 +294,7 @@ export default function SharesPage() {
     const isSelected = selectedShares.has(share.id);
 
     return (
-      <Card className={`group hover:shadow-lg transition-all ${isSelected ? 'ring-2 ring-blue-500' : ''}`}>
+      <Card className={`group hover:shadow-lg transition-all ${isSelected ? 'ring-2 ring-pmn-green' : ''}`}>
         <CardContent className="p-3 sm:p-4">
           <div className="flex items-start gap-2 sm:gap-4">
             <Checkbox
@@ -376,7 +376,7 @@ export default function SharesPage() {
                   </Badge>
                 )}
                 {share.can_write && (
-                  <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                  <Badge variant="outline" className="text-xs bg-pmn-green/[.06] text-pmn-green border-pmn-green/20">
                     Écriture
                   </Badge>
                 )}
@@ -459,13 +459,13 @@ export default function SharesPage() {
   }
 
   return (
-    <div className="space-y-6 md:space-y-8 p-4 md:p-0">
+    <div className="mx-auto max-w-[1320px] animate-fade-up space-y-6 px-6 pb-12 pt-[34px] md:space-y-8 md:px-10">
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6">
-        <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl sm:rounded-3xl bg-gradient-to-br from-blue-600 to-blue-700 shadow-lg flex-shrink-0">
+        <div className="flex h-16 w-16 sm:h-20 sm:w-20 items-center justify-center rounded-2xl sm:rounded-3xl bg-gradient-to-br from-[#15654B] to-[#0E3B2E] shadow-lg flex-shrink-0">
           <Share2 className="h-8 w-8 sm:h-10 sm:w-10 text-white" strokeWidth={2.5} />
         </div>
         <div className="flex-1">
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Documents Partagés</h1>
+          <h1 className="text-2xl sm:text-[34px] font-semibold tracking-[-.4px] text-pmn-ink-strong">Documents Partagés</h1>
           <p className="text-gray-600 mt-1 text-sm sm:text-base">
             Gérez vos partages et accédez aux documents partagés
           </p>
@@ -498,7 +498,7 @@ export default function SharesPage() {
                 </p>
                 <p className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900">{sharedCount}</p>
               </div>
-              <div className="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-xl sm:rounded-2xl bg-blue-600 shadow-lg flex-shrink-0">
+              <div className="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-xl sm:rounded-2xl bg-pmn-green shadow-lg flex-shrink-0">
                 <Share2 className="h-5 w-5 sm:h-7 sm:w-7 text-white" strokeWidth={2.5} />
               </div>
             </div>
@@ -577,11 +577,11 @@ export default function SharesPage() {
           </div>
 
           {selectedShares.size > 0 && (
-            <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
-              <span className="text-sm font-medium text-blue-900">
+            <div className="mt-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-pmn-green/[.06] border border-pmn-green/20 rounded-lg p-3">
+              <span className="text-sm font-medium text-pmn-green-dark">
                 {selectedShares.size} sélectionné(s)
               </span>
-              <Button onClick={handleBulkDownload} size="sm" className="bg-blue-600 hover:bg-blue-700">
+              <Button onClick={handleBulkDownload} size="sm" className="bg-pmn-green hover:bg-pmn-green-dark">
                 <Download className="h-4 w-4 mr-2" />
                 ZIP
               </Button>
@@ -593,7 +593,7 @@ export default function SharesPage() {
           <div className="grid gap-6 lg:grid-cols-2">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <Folder className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                <Folder className="h-5 w-5 text-pmn-green flex-shrink-0" />
                 <h2 className="text-base sm:text-lg font-bold text-gray-900">Par moi</h2>
                 <Badge variant="secondary" className="text-xs">{filteredSharedByMe.length}</Badge>
               </div>
@@ -614,7 +614,7 @@ export default function SharesPage() {
 
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <Folder className="h-5 w-5 text-blue-600 flex-shrink-0" />
+                <Folder className="h-5 w-5 text-pmn-green flex-shrink-0" />
                 <h2 className="text-base sm:text-lg font-bold text-gray-900">Avec moi</h2>
                 <Badge variant="secondary" className="text-xs">{filteredSharedWithMe.length}</Badge>
               </div>
@@ -703,7 +703,7 @@ export default function SharesPage() {
                       </Badge>
                     )}
                     {previewShare.can_write && (
-                      <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                      <Badge variant="outline" className="bg-pmn-green/[.06] text-pmn-green">
                         Écriture
                       </Badge>
                     )}

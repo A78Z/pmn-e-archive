@@ -18,9 +18,9 @@ const config: Config = {
         },
         extend: {
             colors: {
-                border: "hsl(var(--border))",
-                input: "hsl(var(--input))",
-                ring: "hsl(var(--ring))",
+                border: "var(--border)",
+                input: "var(--input)",
+                ring: "var(--ring)",
                 background: "var(--color-background)",
                 foreground: "var(--color-foreground)",
                 primary: {
@@ -51,6 +51,26 @@ const config: Config = {
                     DEFAULT: "var(--color-card)",
                     foreground: "var(--color-card-foreground)",
                 },
+                // Charte PMN
+                pmn: {
+                    ink: "var(--pmn-ink)",
+                    "ink-strong": "var(--pmn-ink-strong)",
+                    text2: "var(--pmn-text-2)",
+                    subtle: "var(--pmn-subtle)",
+                    faint: "var(--pmn-faint)",
+                    faint2: "var(--pmn-faint-2)",
+                    green: "var(--pmn-green)",
+                    "green-dark": "var(--pmn-green-dark)",
+                    "green-deep": "var(--pmn-green-deep)",
+                    "green-light": "var(--pmn-green-light)",
+                    gold: "var(--pmn-gold)",
+                    "gold-dark": "var(--pmn-gold-dark)",
+                    "gold-deep": "var(--pmn-gold-deep)",
+                    hover: "var(--pmn-hover)",
+                    online: "var(--pmn-online)",
+                    pdf: "var(--pmn-pdf)",
+                    doc: "var(--pmn-doc)",
+                },
                 // Chart colors
                 chart: {
                     1: "var(--color-chart-1)",
@@ -67,9 +87,13 @@ const config: Config = {
             },
             boxShadow: {
                 soft: "var(--shadow-soft)",
+                card: "var(--shadow-card)",
+                cta: "var(--shadow-cta)",
+                "card-hover": "var(--shadow-card-hover)",
             },
             fontFamily: {
-                sans: ["var(--font-sans)", "sans-serif"],
+                sans: ["var(--font-public-sans)", "system-ui", "sans-serif"],
+                display: ["var(--font-spectral)", "Georgia", "serif"],
             },
             keyframes: {
                 "accordion-down": {
@@ -80,10 +104,15 @@ const config: Config = {
                     from: { height: "var(--radix-accordion-content-height)" },
                     to: { height: "0" },
                 },
+                "fade-up": {
+                    from: { opacity: "0", transform: "translateY(8px)" },
+                    to: { opacity: "1", transform: "none" },
+                },
             },
             animation: {
                 "accordion-down": "accordion-down 0.2s ease-out",
                 "accordion-up": "accordion-up 0.2s ease-out",
+                "fade-up": "fade-up 0.35s ease both",
             },
         },
     },

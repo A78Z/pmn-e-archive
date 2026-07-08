@@ -4,45 +4,79 @@
 
 @layer base {
   :root {
-    --color-background: hsl(50 60% 97%);
-    --color-foreground: hsl(160 20% 20%);
-    --color-surface: hsl(0 0% 100%);
-    --color-surface-foreground: hsl(154 25% 18%);
-    --color-card: hsl(0 0% 100%);
-    --color-card-foreground: hsl(160 20% 20%);
-    --color-popover: hsl(0 0% 100%);
-    --color-popover-foreground: hsl(160 20% 20%);
-    --color-primary: hsl(153 64% 26%);
-    --color-primary-foreground: hsl(48 100% 96%);
-    --color-secondary: hsl(48 94% 62%);
-    --color-secondary-foreground: hsl(154 40% 20%);
-    --color-muted: hsl(52 45% 92%);
-    --color-muted-foreground: hsl(152 16% 32%);
-    --color-accent: hsl(98 60% 54%);
-    --color-accent-foreground: hsl(158 34% 18%);
-    --color-destructive: hsl(8 70% 54%);
-    --color-destructive-foreground: hsl(50 100% 98%);
-    
-    /* Missing variables I noticed in config mapping but need defaults */
-    --border: hsl(52 38% 88%);
-    --input: hsl(52 38% 88%);
-    --ring: hsl(153 64% 26%);
-    --color-border: hsl(52 38% 88%); /* Kept for compat if used directly */
-    --color-input: hsl(52 38% 88%);
-    --color-ring: hsl(153 64% 26%);
-    --color-outline: hsl(48 100% 75%);
-    
-    --color-chart-1: hsl(153 64% 32%);
-    --color-chart-2: hsl(48 94% 52%);
-    --color-chart-3: hsl(98 53% 45%);
-    --color-chart-4: hsl(191 70% 42%);
-    --color-chart-5: hsl(22 90% 56%);
-    
-    --radius-lg: 0.75rem;
-    --radius-md: calc(0.75rem - 2px);
-    --radius-sm: calc(0.75rem - 4px);
-    
-    --shadow-soft: 0 20px 45px -25px rgb(21 128 61 / 0.35);
+    /* ============ Charte Archive PMN (design-reference/README.md) ============ */
+
+    /* Fonds & surfaces */
+    --color-background: #F6F5F0;
+    --color-foreground: #16231E;
+    --color-surface: #FFFFFF;
+    --color-surface-foreground: #16231E;
+    --color-card: #FFFFFF;
+    --color-card-foreground: #16231E;
+    --color-popover: #FFFFFF;
+    --color-popover-foreground: #16231E;
+
+    /* Vert primaire / Or PMN */
+    --color-primary: #15654B;
+    --color-primary-foreground: #FFFFFF;
+    --color-secondary: #E4B429;
+    --color-secondary-foreground: #3A2A00;
+
+    --color-muted: #F1F0EB;
+    --color-muted-foreground: #66746E;
+    --color-accent: #1F8A63;
+    --color-accent-foreground: #FFFFFF;
+    --color-destructive: #C63131;
+    --color-destructive-foreground: #FFFFFF;
+
+    /* Bordures / focus */
+    --border: rgba(20, 33, 28, 0.08);
+    --input: rgba(20, 33, 28, 0.12);
+    --ring: #15654B;
+    --color-border: rgba(20, 33, 28, 0.08);
+    --color-input: rgba(20, 33, 28, 0.12);
+    --color-ring: #15654B;
+    --color-outline: #E4B429;
+
+    /* Palette PMN nommée */
+    --pmn-ink: #16231E;
+    --pmn-ink-strong: #12211B;
+    --pmn-text-2: #3E4B45;
+    --pmn-subtle: #66746E;
+    --pmn-faint: #93A099;
+    --pmn-faint-2: #8A948F;
+    --pmn-green: #15654B;
+    --pmn-green-dark: #0E3B2E;
+    --pmn-green-deep: #124F3B;
+    --pmn-green-light: #1F8A63;
+    --pmn-gold: #E4B429;
+    --pmn-gold-dark: #B8871A;
+    --pmn-gold-deep: #C7961A;
+    --pmn-hover: #FAFAF7;
+    --pmn-online: #22A06B;
+    --pmn-pdf: #C63131;
+    --pmn-doc: #2B6FDB;
+    --pmn-sidebar-top: #0C3327;
+    --pmn-sidebar-mid: #0F3D2E;
+    --pmn-sidebar-bottom: #0B2C22;
+
+    /* Graphes */
+    --color-chart-1: #15654B;
+    --color-chart-2: #E4B429;
+    --color-chart-3: #1F8A63;
+    --color-chart-4: #C7961A;
+    --color-chart-5: #66746E;
+
+    /* Rayons */
+    --radius-lg: 16px;
+    --radius-md: 11px;
+    --radius-sm: 9px;
+
+    /* Ombres */
+    --shadow-card: 0 1px 2px rgba(20, 33, 28, 0.04);
+    --shadow-cta: 0 2px 8px rgba(14, 59, 46, 0.25);
+    --shadow-card-hover: 0 6px 18px rgba(20, 33, 28, 0.08);
+    --shadow-soft: 0 1px 2px rgba(20, 33, 28, 0.04);
 
     /* Radix Accordion defaults (Shadcn often uses these) */
     --radix-accordion-content-height: 0;
@@ -51,7 +85,7 @@
   * {
     @apply border-border;
   }
-  
+
   html,
   body {
     height: 100%;
@@ -59,10 +93,8 @@
 
   body {
     @apply min-h-screen text-foreground;
-    background: radial-gradient(120% 120% at 50% 0%, rgba(250, 204, 21, 0.18), transparent 60%),
-      radial-gradient(100% 100% at 10% 60%, rgba(16, 185, 129, 0.12), transparent 65%),
-      var(--color-background);
-    font-feature-settings: "ss03", "ss06";
+    background: var(--color-background);
+    -webkit-font-smoothing: antialiased;
   }
 }
 
@@ -70,28 +102,57 @@
   .surface {
     background: var(--color-surface);
     color: var(--color-surface-foreground);
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-soft);
+    box-shadow: var(--shadow-card);
   }
-  
+
+  /* Titres display (Spectral pour la marque / chiffres) */
+  .font-display {
+    font-family: var(--font-spectral), Georgia, serif;
+  }
+
+  /* Entrée d'écran */
+  .animate-fade-up {
+    animation: fadeUp 0.35s ease both;
+  }
+
+  /* Pastille « Archivé » */
+  .pill-archive {
+    color: var(--pmn-gold-dark);
+    background: rgba(228, 180, 41, 0.14);
+    border: 1px solid rgba(228, 180, 41, 0.3);
+  }
+
   .badge-chart-1 {
-    background-color: hsl(var(--color-chart-1) / 0.16);
+    background-color: rgba(21, 101, 75, 0.16);
     color: var(--color-chart-1);
   }
   .badge-chart-2 {
-    background-color: hsl(var(--color-chart-2) / 0.16);
-    color: var(--color-chart-2);
+    background-color: rgba(228, 180, 41, 0.16);
+    color: var(--pmn-gold-dark);
   }
   .badge-chart-3 {
-    background-color: hsl(var(--color-chart-3) / 0.16);
+    background-color: rgba(31, 138, 99, 0.16);
     color: var(--color-chart-3);
   }
   .badge-chart-4 {
-    background-color: hsl(var(--color-chart-4) / 0.16);
+    background-color: rgba(199, 150, 26, 0.16);
     color: var(--color-chart-4);
   }
   .badge-chart-5 {
-    background-color: hsl(var(--color-chart-5) / 0.16);
+    background-color: rgba(102, 116, 110, 0.16);
     color: var(--color-chart-5);
+  }
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }

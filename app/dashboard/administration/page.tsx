@@ -271,7 +271,7 @@ export default function AdministrationPage() {
   const STORAGE_COLORS = ['#3B82F6', '#E5E7EB'];
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-[1320px] animate-fade-up space-y-8 px-6 pb-12 pt-[34px] md:px-10">
       <div>
         <h1 className="text-3xl font-bold">Administration</h1>
         <p className="text-muted-foreground mt-1">Gestion des utilisateurs et des droits d&apos;accès</p>
@@ -285,7 +285,7 @@ export default function AdministrationPage() {
                 <p className="text-sm text-muted-foreground">Utilisateurs Totaux</p>
                 <p className="text-xl font-bold">Tous les comptes</p>
               </div>
-              <Users className="h-8 w-8 text-blue-600" />
+              <Users className="h-8 w-8 text-pmn-green" />
             </div>
           </CardHeader>
           <CardContent className="flex items-center justify-center py-8">
@@ -399,7 +399,7 @@ export default function AdministrationPage() {
                 <p className="text-sm text-muted-foreground">Documents</p>
                 <p className="text-xl font-bold">Total fichiers</p>
               </div>
-              <FileText className="h-8 w-8 text-blue-600" />
+              <FileText className="h-8 w-8 text-pmn-green" />
             </div>
           </CardHeader>
           <CardContent className="py-6">
@@ -420,7 +420,7 @@ export default function AdministrationPage() {
         <Card className="border shadow-sm">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-lg">
-              <BarChart3 className="h-5 w-5 text-blue-600" />
+              <BarChart3 className="h-5 w-5 text-pmn-green" />
               Répartition par Rôle
             </CardTitle>
           </CardHeader>
@@ -518,7 +518,7 @@ export default function AdministrationPage() {
       <Card className="border shadow-sm">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5 text-blue-600" />
+            <TrendingUp className="h-5 w-5 text-pmn-green" />
             Activité Mensuelle (6 derniers mois)
           </CardTitle>
         </CardHeader>
@@ -635,7 +635,7 @@ export default function AdministrationPage() {
                 toast.success('Liste des utilisateurs actualisée');
               }}
               variant="outline"
-              className="border-blue-600 text-blue-600 hover:bg-blue-50"
+              className="border-pmn-green text-pmn-green hover:bg-pmn-green/[.06]"
             >
               <Activity className="h-4 w-4 mr-2" />
               Actualiser

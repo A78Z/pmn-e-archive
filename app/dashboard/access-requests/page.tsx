@@ -369,7 +369,7 @@ export default function AccessRequestsPage() {
 
               <div className="flex gap-2 flex-wrap mb-3">
                 {request.requested_permissions?.can_read && (
-                  <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700">Lecture</Badge>
+                  <Badge variant="outline" className="text-xs bg-pmn-green/[.06] text-pmn-green">Lecture</Badge>
                 )}
                 {request.requested_permissions?.can_write && (
                   <Badge variant="outline" className="text-xs bg-purple-50 text-purple-700">Écriture</Badge>
@@ -432,14 +432,14 @@ export default function AccessRequestsPage() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-[1320px] animate-fade-up space-y-8 px-6 pb-12 pt-[34px] md:px-10">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-6">
           <div className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-purple-600 to-purple-700 shadow-lg">
             <ShieldCheck className="h-10 w-10 text-white" strokeWidth={2.5} />
           </div>
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Demandes d'Accès</h1>
+            <h1 className="text-[34px] font-semibold tracking-[-.4px] text-pmn-ink-strong">Demandes d'Accès</h1>
             <p className="text-gray-600 mt-1">
               Gérez et approuvez les demandes d'accès aux documents de façon sécurisée
             </p>
@@ -474,7 +474,7 @@ export default function AccessRequestsPage() {
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Mes demandes</p>
                 <p className="text-5xl font-bold text-gray-900">{myRequestsCount}</p>
               </div>
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 shadow-lg">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-pmn-green shadow-lg">
                 <FileText className="h-7 w-7 text-white" strokeWidth={2.5} />
               </div>
             </div>
@@ -565,7 +565,7 @@ export default function AccessRequestsPage() {
 
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <Users2 className="h-5 w-5 text-blue-600" />
+                <Users2 className="h-5 w-5 text-pmn-green" />
                 <h2 className="text-lg font-bold text-gray-900">Mes demandes</h2>
                 <Badge variant="secondary">{filteredMyRequests.length}</Badge>
               </div>
@@ -713,7 +713,7 @@ export default function AccessRequestsPage() {
                 <p className="text-sm font-medium text-gray-500 mb-2">Permissions demandées</p>
                 <div className="flex gap-2 flex-wrap">
                   {selectedRequest.requested_permissions?.can_read && (
-                    <Badge variant="outline" className="bg-blue-50 text-blue-700">Lecture</Badge>
+                    <Badge variant="outline" className="bg-pmn-green/[.06] text-pmn-green">Lecture</Badge>
                   )}
                   {selectedRequest.requested_permissions?.can_write && (
                     <Badge variant="outline" className="bg-purple-50 text-purple-700">Écriture</Badge>

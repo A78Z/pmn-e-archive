@@ -66,7 +66,7 @@ export default function CleanupPage() {
     };
 
     return (
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 pb-8">
+        <div className="mx-auto flex w-full max-w-4xl animate-fade-up flex-col gap-8 px-6 pb-12 pt-[34px] md:px-10">
             {/* Header */}
             <div>
                 <span className="inline-flex items-center gap-2 rounded-full bg-red-50 px-4 py-1 text-xs font-semibold uppercase tracking-wider text-red-600">
@@ -117,7 +117,7 @@ export default function CleanupPage() {
                             {stats.total > 0 && (
                                 <div className="w-full bg-gray-200 rounded-full h-2">
                                     <div
-                                        className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                                        className="bg-pmn-green h-2 rounded-full transition-all duration-300"
                                         style={{ width: `${(stats.deleted / stats.total) * 100}%` }}
                                     />
                                 </div>

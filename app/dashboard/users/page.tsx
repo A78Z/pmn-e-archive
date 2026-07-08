@@ -159,7 +159,7 @@ export default function UsersManagementPage() {
   const getRoleBadge = (role: string) => {
     const colors: Record<string, string> = {
       super_admin: 'bg-purple-100 text-purple-800 border-purple-300',
-      admin: 'bg-blue-100 text-blue-800 border-blue-300',
+      admin: 'bg-pmn-green/10 text-pmn-green-dark border-pmn-green/30',
       user: 'bg-green-100 text-green-800 border-green-300',
       guest: 'bg-gray-100 text-gray-800 border-gray-300',
     };
@@ -189,9 +189,9 @@ export default function UsersManagementPage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8 max-w-7xl">
+    <div className="mx-auto max-w-[1320px] animate-fade-up px-6 pb-12 pt-[34px] md:px-10">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-3">
+        <h1 className="text-[34px] font-semibold tracking-[-.4px] text-pmn-ink-strong flex items-center gap-3">
           <Users className="h-8 w-8 text-green-600" />
           Gestion des Utilisateurs
         </h1>
@@ -297,7 +297,7 @@ export default function UsersManagementPage() {
                     {u.role === 'super_admin' ? (
                       <Crown className="h-6 w-6 text-purple-600" />
                     ) : u.role === 'admin' ? (
-                      <Shield className="h-6 w-6 text-blue-600" />
+                      <Shield className="h-6 w-6 text-pmn-green" />
                     ) : (
                       <UserIcon className="h-6 w-6 text-green-600" />
                     )}

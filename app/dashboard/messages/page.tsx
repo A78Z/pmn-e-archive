@@ -19,8 +19,6 @@ import {
   Circle,
   MessageCircle,
   MoreVertical,
-  Phone,
-  Video,
   Upload,
   FileText,
   Image as ImageIcon,
@@ -423,45 +421,38 @@ export default function ModernMessagingPage() {
   );
 
   return (
-    <div className="h-[calc(100vh-6rem)] flex flex-col rounded-3xl border border-border/60 bg-background/80 shadow-2xl shadow-primary/10 backdrop-blur">
-      <div
-        className="flex items-center justify-between gap-6 rounded-t-3xl border-b border-primary/20 px-6 py-8"
-        style={{ background: 'linear-gradient(135deg, hsl(153 64% 26%) 0%, hsl(48 94% 62%) 100%)' }}
-      >
-        <div>
-          <h1 className="text-3xl font-semibold text-primary-foreground">Messagerie PMN</h1>
-          <p className="mt-2 text-sm font-medium text-primary-foreground/70">Communication en temps réel</p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Button
-            onClick={() => setShowNewConversationDialog(true)}
-            className="gap-2 rounded-xl bg-primary-foreground text-primary font-semibold shadow-lg shadow-primary/30 transition-all hover:scale-[1.01] hover:bg-primary-foreground/90"
-          >
-            <Plus className="h-4 w-4" />
-            Message
-          </Button>
-          <Button
-            onClick={() => setShowNewChannelDialog(true)}
-            variant="secondary"
-            className="gap-2 rounded-xl shadow-lg shadow-secondary/30 transition-all hover:scale-[1.01]"
-          >
-            <Hash className="h-4 w-4" />
-            Canal
-          </Button>
-        </div>
-      </div>
-
+    <div className="flex h-full animate-fade-up flex-col bg-pmn-hover">
       <div className="flex flex-1 overflow-hidden">
-        <div className="flex w-80 flex-col border-r border-border/60 bg-background/70">
-          <div className="space-y-3 p-4">
+        <div className="flex w-[340px] flex-none flex-col border-r border-border bg-white">
+          <div className="space-y-3 px-5 pb-3.5 pt-[22px]">
+            <div className="flex items-center justify-between gap-2">
+              <h1 className="text-2xl font-semibold tracking-[-.3px] text-pmn-ink-strong">Messages</h1>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  onClick={() => setShowNewConversationDialog(true)}
+                  size="icon"
+                  title="Nouvelle conversation"
+                  className="h-9 w-9 rounded-[10px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] text-white shadow-cta transition-[filter] hover:brightness-110"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+                <Button
+                  onClick={() => setShowNewChannelDialog(true)}
+                  size="icon"
+                  title="Nouveau canal"
+                  className="h-9 w-9 rounded-[10px] bg-pmn-gold text-[#3A2A00] hover:bg-pmn-gold-deep"
+                >
+                  <Hash className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-primary/40" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-pmn-faint" />
               <Input
-                placeholder="Rechercher..."
+                placeholder="Rechercher une conversation..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 rounded-xl border-border bg-background"
+                className="h-10 rounded-[11px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] pl-9 text-[13.5px]"
               />
             </div>
 
@@ -596,10 +587,10 @@ export default function ModernMessagingPage() {
         </div>
 
         {/* Chat Area */}
-        <div className="flex flex-1 flex-col bg-background/40">
+        <div className="flex min-w-0 flex-1 flex-col bg-pmn-hover">
           {(selectedConversation || selectedChannel) ? (
             <>
-              <div className="flex items-center justify-between border-b border-border/60 bg-background/60 px-6 py-4 backdrop-blur-sm">
+              <div className="flex h-[70px] flex-none items-center justify-between border-b border-border bg-white px-6">
                 <div className="flex items-center gap-4">
                   {selectedConversation ? (
                     <>
@@ -626,14 +617,12 @@ export default function ModernMessagingPage() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-                    <Phone className="h-5 w-5" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-                    <Video className="h-5 w-5" />
-                  </Button>
-                  <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground">
-                    <MoreVertical className="h-5 w-5" />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-[38px] w-[38px] rounded-[10px] border border-border text-pmn-subtle hover:bg-pmn-hover"
+                  >
+                    <MoreVertical className="h-[18px] w-[18px]" />
                   </Button>
                 </div>
               </div>
@@ -655,9 +644,9 @@ export default function ModernMessagingPage() {
                           </Avatar>
                         )}
                         <div
-                          className={`rounded-2xl px-4 py-3 shadow-sm ${isMe
-                            ? 'bg-primary text-primary-foreground rounded-tr-none'
-                            : 'bg-white border border-border/50 rounded-tl-none'
+                          className={`px-[15px] py-3 shadow-card ${isMe
+                            ? 'rounded-[16px_16px_4px_16px] bg-gradient-to-br from-[#15654B] to-[#124F3B] text-white'
+                            : 'rounded-[16px_16px_16px_4px] border border-border bg-white text-pmn-ink'
                             }`}
                         >
                           {!isMe && selectedChannel && (
@@ -705,15 +694,15 @@ export default function ModernMessagingPage() {
                 <div ref={messagesEndRef} />
               </div>
 
-              <div className="border-t border-border/60 bg-background/60 p-4 backdrop-blur-sm">
+              <div className="flex-none border-t border-border bg-white px-6 pb-5 pt-4">
                 {pendingAttachment && (
-                  <div className="mb-2 flex items-center gap-2 p-2 bg-blue-50 border border-blue-200 rounded-lg">
+                  <div className="mb-2 flex items-center gap-2 rounded-[11px] border border-pmn-green/20 bg-pmn-green/[.06] p-2">
                     {pendingAttachment.type?.startsWith('image/') ? (
-                      <ImageIcon className="h-4 w-4 text-blue-600" />
+                      <ImageIcon className="h-4 w-4 text-pmn-green" />
                     ) : (
-                      <FileText className="h-4 w-4 text-blue-600" />
+                      <FileText className="h-4 w-4 text-pmn-green" />
                     )}
-                    <span className="text-xs text-blue-900 font-medium flex-1">{pendingAttachment.name}</span>
+                    <span className="flex-1 text-xs font-medium text-pmn-green-dark">{pendingAttachment.name}</span>
                     <Button
                       type="button"
                       variant="ghost"
@@ -730,17 +719,15 @@ export default function ModernMessagingPage() {
                 )}
                 <form
                   onSubmit={selectedConversation ? handleSendDirectMessage : handleSendChannelMessage}
-                  className="flex items-end gap-2"
+                  className="flex items-center gap-2.5 rounded-[14px] border border-[rgba(20,33,28,.08)] bg-[#F6F5F0] p-1.5 pl-4"
                 >
-                  <Button
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-10 w-10 rounded-full text-muted-foreground hover:bg-secondary/20 hover:text-secondary-foreground"
+                    className="flex-none text-pmn-faint transition-colors hover:text-pmn-green"
                     onClick={handleFileButtonClick}
                   >
-                    <Paperclip className="h-5 w-5" />
-                  </Button>
+                    <Paperclip className="h-5 w-5" strokeWidth={1.9} />
+                  </button>
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -748,18 +735,18 @@ export default function ModernMessagingPage() {
                     onChange={handleFileSelect}
                   />
 
-                  <div className="relative flex-1">
+                  <div className="relative min-w-0 flex-1">
                     <Input
                       value={newMessage}
                       onChange={(e) => setNewMessage(e.target.value)}
                       placeholder="Écrivez votre message..."
-                      className="pr-10 min-h-[2.5rem] py-3 rounded-xl border-border bg-background shadow-inner"
+                      className="h-10 border-none bg-transparent pr-10 text-sm shadow-none focus-visible:ring-0"
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 text-muted-foreground hover:text-foreground"
+                      className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 text-pmn-faint hover:text-pmn-subtle"
                     >
                       <Smile className="h-5 w-5" />
                     </Button>
@@ -768,9 +755,9 @@ export default function ModernMessagingPage() {
                   <Button
                     type="submit"
                     disabled={!newMessage.trim() && !uploading}
-                    className="h-10 w-10 rounded-full bg-primary text-primary-foreground shadow-lg shadow-primary/20 hover:bg-primary/90 disabled:opacity-50"
+                    className="h-[42px] w-[42px] flex-none rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] text-white shadow-cta transition-[filter] hover:brightness-110 disabled:opacity-50"
                   >
-                    <Send className="h-5 w-5" />
+                    <Send className="h-[19px] w-[19px]" />
                   </Button>
                 </form>
               </div>

@@ -1,12 +1,10 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Image from 'next/image';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import {
   LayoutDashboard,
@@ -19,12 +17,25 @@ import {
   Menu,
   LogOut,
   Users,
+  ChevronRight,
 } from 'lucide-react';
 import { NotificationsBell } from '@/components/notifications-bell';
 import { useAuth } from '@/lib/parse-auth';
 import { Parse, ParseClasses } from '@/lib/parse';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+
+const CRUMBS: Record<string, string> = {
+  '/dashboard': 'Tableau de bord',
+  '/dashboard/documents': 'Documents',
+  '/dashboard/upload': 'Uploader',
+  '/dashboard/messages': 'Messages',
+  '/dashboard/shares': 'Partages',
+  '/dashboard/access-requests': "Demandes d'accès",
+  '/dashboard/administration': 'Administration',
+  '/dashboard/users': 'Gestion Utilisateurs',
+  '/dashboard/cleanup': 'Nettoyage',
+};
 
 function DashboardContent({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -97,87 +108,121 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
     return name?.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2) || 'U';
   };
 
-  const menuItems = useMemo(() => [
-    { icon: LayoutDashboard, label: 'Tableau de bord', href: '/dashboard', badge: null },
+  const roleLabel =
+    profile?.role === 'super_admin'
+      ? 'Super Administrateur'
+      : profile?.role === 'admin'
+        ? 'Administrateur'
+        : 'Utilisateur';
+
+  const crumb = CRUMBS[pathname] || 'Documents';
+
+  const mainItems = [
+    { icon: LayoutDashboard, label: 'Tableau de bord', href: '/dashboard', badge: null as number | null },
     { icon: FileText, label: 'Documents', href: '/dashboard/documents', badge: null },
     { icon: Upload, label: 'Uploader', href: '/dashboard/upload', badge: null },
     { icon: MessageSquare, label: 'Messages', href: '/dashboard/messages', badge: messageCount },
     { icon: Share2, label: 'Partages', href: '/dashboard/shares', badge: null },
     { icon: ShieldCheck, label: "Demandes d'accès", href: '/dashboard/access-requests', badge: requestCount },
-  ], [messageCount, requestCount]);
+  ];
 
-  const NavLinks = () => (
+  const NavButton = ({
+    icon: Icon,
+    label,
+    href,
+    badge,
+  }: {
+    icon: any;
+    label: string;
+    href: string;
+    badge: number | null;
+  }) => {
+    const active = pathname === href;
+    return (
+      <Link
+        href={href}
+        onClick={() => setMobileOpen(false)}
+        className={cn(
+          'flex items-center gap-3 rounded-[11px] px-[13px] py-[11px] text-sm font-medium text-[#E7F1EB] transition-colors duration-150 border-l-[3px]',
+          active
+            ? 'border-l-[#E4B429] bg-[rgba(228,180,41,.16)]'
+            : 'border-l-transparent hover:bg-[rgba(255,255,255,.06)]'
+        )}
+      >
+        <Icon className="h-[19px] w-[19px]" strokeWidth={1.9} />
+        <span className="flex-1">{label}</span>
+        {badge !== null && badge > 0 && (
+          <span className="flex h-5 min-w-[20px] items-center justify-center rounded-[10px] bg-[#E4B429] px-1.5 text-[11px] font-extrabold text-[#3A2A00]">
+            {badge}
+          </span>
+        )}
+      </Link>
+    );
+  };
+
+  const SidebarInner = () => (
     <>
-      <div className="space-y-1">
-        {menuItems.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={() => setMobileOpen(false)}
-            className={cn(
-              'flex items-center justify-between gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition-all',
-              pathname === item.href
-                ? 'bg-secondary text-secondary-foreground shadow-md ring-1 ring-secondary/40'
-                : 'text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground'
-            )}
-          >
-            <div className="flex items-center gap-3">
-              <item.icon className="h-5 w-5" />
-              <span>{item.label}</span>
-            </div>
-            {item.badge !== null && item.badge > 0 && (
-              <Badge className="bg-secondary text-secondary-foreground font-semibold ring-1 ring-secondary/30">
-                {item.badge}
-              </Badge>
-            )}
-          </Link>
-        ))}
+      {/* marque */}
+      <div className="relative flex items-center gap-[13px] border-b border-white/[.07] px-5 py-5">
+        <div className="flex h-[46px] w-[46px] flex-none items-center justify-center overflow-hidden rounded-xl bg-white shadow-[0_2px_8px_rgba(0,0,0,.25)]">
+          <Image src="/assets/pmn-logo.png" alt="PMN" width={44} height={44} className="object-contain" />
+        </div>
+        <div className="min-w-0 leading-tight">
+          <div className="font-display text-[19px] font-semibold tracking-[.2px]">Archive PMN</div>
+          <div className="text-[11.5px] font-semibold tracking-[.3px] text-[#E4B429]">
+            Plateforme numérique
+          </div>
+        </div>
       </div>
 
-      {profile && ['admin', 'super_admin'].includes(profile.role) && (
-        <div className="mt-6 space-y-2">
-          <p className="px-4 text-xs font-semibold uppercase tracking-widest text-secondary/80">
-            Administration
-          </p>
-          <Link
-            href="/dashboard/administration"
-            onClick={() => setMobileOpen(false)}
-            className={cn(
-              'flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition-all',
-              pathname === '/dashboard/administration'
-                ? 'bg-secondary text-secondary-foreground shadow-md ring-1 ring-secondary/40'
-                : 'text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground'
-            )}
-          >
-            <Settings className="h-5 w-5" />
-            <span>Administration</span>
-          </Link>
-          {profile.role === 'super_admin' && (
-            <Link
-              href="/dashboard/users"
-              onClick={() => setMobileOpen(false)}
-              className={cn(
-                'flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium transition-all',
-                pathname === '/dashboard/users'
-                  ? 'bg-secondary text-secondary-foreground shadow-md ring-1 ring-secondary/40'
-                  : 'text-primary-foreground/80 hover:bg-primary-foreground/10 hover:text-primary-foreground'
-              )}
-            >
-              <Users className="h-5 w-5" />
-              <span>Gestion Utilisateurs</span>
-            </Link>
-          )}
+      {/* navigation */}
+      <nav className="relative flex flex-1 flex-col gap-[3px] overflow-y-auto px-3.5 pb-2.5 pt-4">
+        <div className="px-3 pb-2 pt-1.5 text-[10.5px] font-bold tracking-[.14em] text-[#EAF3EE]/[.42]">
+          MENU PRINCIPAL
         </div>
-      )}
+        {mainItems.map((item) => (
+          <NavButton key={item.href} {...item} />
+        ))}
+
+        {profile && ['admin', 'super_admin'].includes(profile.role) && (
+          <>
+            <div className="px-3 pb-2 pt-4 text-[10.5px] font-bold tracking-[.14em] text-[#EAF3EE]/[.42]">
+              ADMINISTRATION
+            </div>
+            <NavButton icon={Settings} label="Administration" href="/dashboard/administration" badge={null} />
+            {profile.role === 'super_admin' && (
+              <NavButton icon={Users} label="Gestion Utilisateurs" href="/dashboard/users" badge={null} />
+            )}
+          </>
+        )}
+      </nav>
+
+      {/* utilisateur */}
+      <div className="relative flex items-center gap-3 border-t border-white/[.08] px-4 py-3.5">
+        <div className="flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-br from-[#E4B429] to-[#C7961A] text-[15px] font-extrabold text-[#3A2A00]">
+          {getInitials(profile?.full_name || 'User')}
+        </div>
+        <div className="min-w-0 flex-1 leading-tight">
+          <div className="truncate text-[13.5px] font-semibold">{profile?.full_name || 'Utilisateur'}</div>
+          <div className="truncate text-[11.5px] text-[#EAF3EE]/60">{roleLabel}</div>
+        </div>
+        <button
+          title="Déconnexion"
+          onClick={handleSignOut}
+          className="flex h-[34px] w-[34px] items-center justify-center rounded-[9px] text-[#EAF3EE]/70 transition-colors hover:bg-white/[.08] hover:text-white"
+        >
+          <LogOut className="h-[18px] w-[18px]" strokeWidth={1.9} />
+        </button>
+      </div>
     </>
   );
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="flex h-screen items-center justify-center bg-background">
         <div className="text-center">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-green-600 border-t-transparent mx-auto"></div>
-          <p className="mt-4 text-base font-medium text-gray-700">Chargement...</p>
+          <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-pmn-green border-t-transparent"></div>
+          <p className="mt-4 text-base font-medium text-pmn-text2">Chargement...</p>
         </div>
       </div>
     );
@@ -189,124 +234,54 @@ function DashboardContent({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <aside className="hidden lg:flex lg:w-72 lg:flex-col border-r border-border bg-primary text-primary-foreground shadow-xl shadow-primary/30">
-        <div className="flex h-20 items-center gap-3 border-b border-primary-foreground/20 px-6">
-          <Image
-            src="/logo-navbare.png"
-            alt="Logo PMN"
-            width={48}
-            height={48}
-            className="drop-shadow-md"
-          />
-          <div>
-            <h1 className="text-lg font-semibold leading-tight">Archive PMN</h1>
-            <p className="text-xs font-medium text-secondary">Plateforme numérique</p>
-          </div>
-        </div>
-
-        <nav className="flex-1 space-y-2 overflow-y-auto p-4">
-          <NavLinks />
-        </nav>
-
-        <div className="border-t border-primary-foreground/15 p-4">
-          <div className="flex items-center gap-3 rounded-2xl bg-primary-foreground/10 p-3 backdrop-blur-sm">
-            <Avatar className="h-10 w-10">
-              <AvatarFallback className="bg-secondary text-secondary-foreground text-sm font-semibold">
-                {getInitials(profile?.full_name || 'User')}
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">
-                {profile?.full_name || 'Utilisateur'}
-              </p>
-              <p className="text-xs text-secondary/90 truncate">
-                {profile?.role === 'super_admin' ? 'Super Administr...' : profile?.role === 'admin' ? 'Administrateur' : 'Utilisateur'}
-              </p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleSignOut}
-              className="h-8 w-8 text-primary-foreground hover:bg-primary-foreground/20"
-            >
-              <LogOut className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
+      {/* ===== Sidebar desktop ===== */}
+      <aside className="relative hidden w-[270px] flex-none flex-col text-[#EAF3EE] lg:flex bg-[linear-gradient(180deg,#0C3327_0%,#0F3D2E_55%,#0B2C22_100%)]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_40%_at_100%_0%,rgba(228,180,41,.10),transparent_60%)]" />
+        <SidebarInner />
       </aside>
 
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex h-16 items-center justify-between gap-4 border-b border-border bg-card px-4 md:px-6">
-          <div className="flex items-center gap-2 lg:hidden">
-            <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
-              <SheetTrigger asChild>
-                <Button variant="ghost" size="icon" className="text-primary hover:bg-primary/15">
-                  <Menu className="h-6 w-6" />
-                </Button>
-              </SheetTrigger>
-              <SheetContent side="left" className="w-72 p-0 border-none bg-primary text-primary-foreground">
-                <div className="flex h-20 items-center gap-3 border-b border-primary-foreground/20 px-6">
-                  <Image
-                    src="/logo-navbare.png"
-                    alt="Logo PMN"
-                    width={48}
-                    height={48}
-                    className="drop-shadow-md"
-                  />
-                  <div>
-                    <h1 className="text-lg font-semibold leading-tight">Archive PMN</h1>
-                    <p className="text-xs font-medium text-secondary">Plateforme numérique</p>
-                  </div>
-                </div>
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* ===== Barre supérieure ===== */}
+        <header className="z-[5] flex h-16 flex-none items-center justify-between border-b border-border bg-white/85 px-4 backdrop-blur-md md:px-7">
+          <div className="flex items-center gap-2">
+            {/* menu mobile */}
+            <div className="lg:hidden">
+              <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+                <SheetTrigger asChild>
+                  <Button variant="ghost" size="icon" className="text-pmn-green hover:bg-pmn-green/10">
+                    <Menu className="h-6 w-6" />
+                  </Button>
+                </SheetTrigger>
+                <SheetContent
+                  side="left"
+                  className="flex w-[270px] flex-col border-none p-0 text-[#EAF3EE] bg-[linear-gradient(180deg,#0C3327_0%,#0F3D2E_55%,#0B2C22_100%)]"
+                >
+                  <SidebarInner />
+                </SheetContent>
+              </Sheet>
+            </div>
 
-                <nav className="flex-1 space-y-2 overflow-y-auto p-4 max-h-[calc(100vh-200px)]">
-                  <NavLinks />
-                </nav>
+            {/* fil d'Ariane */}
+            <div className="hidden items-center gap-2.5 text-[13px] text-pmn-subtle sm:flex">
+              <span>Espace de travail</span>
+              <ChevronRight className="h-[15px] w-[15px]" strokeWidth={2} />
+              <span className="font-semibold text-pmn-ink">{crumb}</span>
+            </div>
+            <span className="text-[14px] font-semibold text-pmn-ink sm:hidden">{crumb}</span>
+          </div>
 
-                <div className="border-t border-primary-foreground/15 p-4">
-                  <div className="flex items-center gap-3 rounded-2xl bg-primary-foreground/10 p-3 backdrop-blur-sm">
-                    <Avatar className="h-10 w-10">
-                      <AvatarFallback className="bg-secondary text-secondary-foreground text-sm font-semibold">
-                        {getInitials(profile?.full_name || 'User')}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">
-                        {profile?.full_name || 'Utilisateur'}
-                      </p>
-                      <p className="text-xs text-secondary/90 truncate">
-                        {profile?.role === 'super_admin' ? 'Super Administrateur' : profile?.role === 'admin' ? 'Administrateur' : 'Utilisateur'}
-                      </p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={handleSignOut}
-                      className="h-8 w-8 text-primary-foreground hover:bg-primary-foreground/20"
-                    >
-                      <LogOut className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </SheetContent>
-            </Sheet>
-
-            <div className="flex items-center gap-2">
-              <Image
-                src="/logo-navbare.png"
-                alt="Logo PMN"
-                width={32}
-                height={32}
-              />
-              <h1 className="text-base font-semibold text-primary">Archive PMN</h1>
+          <div className="flex items-center gap-2">
+            <div className="rounded-[11px] border border-border bg-white">
+              <NotificationsBell />
+            </div>
+            <div className="mx-1 h-[26px] w-px bg-[rgba(20,33,28,.1)]" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#15654B] to-[#0E3B2E] text-[13px] font-bold text-white">
+              {getInitials(profile?.full_name || 'User')}
             </div>
           </div>
-          <NotificationsBell />
         </header>
 
-        <main className="flex-1 overflow-y-auto bg-transparent px-4 py-6 md:px-8">
-          {children}
-        </main>
+        <main className="flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>
   );

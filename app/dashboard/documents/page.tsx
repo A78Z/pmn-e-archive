@@ -75,6 +75,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { SortableFolderRow } from '@/components/sortable-folder-row';
+import { FolderGlyph, FileTile } from '@/components/pmn-icons';
 
 
 export const dynamic = 'force-dynamic';
@@ -895,7 +896,7 @@ export default function DocumentsPage() {
             isOverThis={isOverThis}
             canMove={canMove}
             onToggle={() => toggleFolder(folder.id)}
-            style={{ paddingLeft: `${Math.min(depth * 1.5 + 1, 8)}rem` }} // Dynamic padding
+            style={depth > 0 ? { paddingLeft: `${18 + depth * 26}px` } : undefined} // indentation charte : depth × 26px
           >
             {/* Same dropdown menu for ALL levels */}
             <DropdownMenu>
@@ -996,8 +997,8 @@ export default function DocumentsPage() {
               {/* Loading state while this folder's documents are being fetched */}
               {loadingFolderIds.has(folder.id) && !docsByFolder[folder.id] && (
                 <div
-                  className="p-4 text-sm text-gray-500 flex items-center gap-2"
-                  style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }}
+                  className="flex items-center gap-2 px-[18px] py-3 text-sm text-pmn-faint"
+                  style={{ paddingLeft: `${18 + (depth + 1) * 26}px` }}
                 >
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Chargement des documents...
@@ -1007,8 +1008,8 @@ export default function DocumentsPage() {
               {/* Error state with retry, instead of a misleading empty folder */}
               {folderErrors[folder.id] && (
                 <div
-                  className="p-4 text-sm text-red-600 flex items-center gap-3 flex-wrap"
-                  style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }}
+                  className="flex flex-wrap items-center gap-3 px-[18px] py-3 text-sm text-destructive"
+                  style={{ paddingLeft: `${18 + (depth + 1) * 26}px` }}
                 >
                   <span>Erreur de chargement : {folderErrors[folder.id]}</span>
                   <Button
@@ -1031,13 +1032,13 @@ export default function DocumentsPage() {
               {docs.map((doc) => (
                 <div
                   key={doc.id}
-                  className="flex items-center gap-3 p-4 hover:bg-gray-100 transition-colors border-t border-gray-100"
-                  style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }} // Match subfolder indentation
+                  className="flex items-center gap-3 border-t border-border px-[18px] py-[9px] transition-colors duration-150 hover:bg-pmn-hover"
+                  style={{ paddingLeft: `${18 + (depth + 1) * 26}px` }} // Match subfolder indentation
                 >
-                  <FileText className="h-5 w-5 text-gray-600 flex-shrink-0" />
+                  <FileTile name={doc.name} size={40} />
                   <div className="flex-1 min-w-0">
-                    <h4 className="font-medium text-gray-900 truncate">{doc.name}</h4>
-                    <p className="text-sm text-gray-500">
+                    <h4 className="truncate text-[14.5px] font-semibold text-pmn-ink">{doc.name}</h4>
+                    <p className="mt-0.5 text-xs text-pmn-faint">
                       {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
                     </p>
                   </div>
@@ -1130,8 +1131,8 @@ export default function DocumentsPage() {
                 !folderErrors[folder.id] &&
                 docsByFolder[folder.id] !== undefined && (
                   <div
-                    className="p-4 text-sm text-gray-500 italic"
-                    style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }}
+                    className="px-[18px] py-3 text-sm italic text-pmn-faint"
+                    style={{ paddingLeft: `${18 + (depth + 1) * 26}px` }}
                   >
                     Dossier vide
                   </div>
@@ -1147,130 +1148,133 @@ export default function DocumentsPage() {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh]">
         <div className="relative">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-600 to-green-700 flex items-center justify-center mb-4 shadow-lg">
+          <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-[#15654B] to-[#0E3B2E] shadow-cta">
             <span className="text-2xl font-bold text-white">PMN</span>
           </div>
-          <Loader2 className="absolute -bottom-2 left-1/2 -translate-x-1/2 h-8 w-8 animate-spin text-green-600" />
+          <Loader2 className="absolute -bottom-2 left-1/2 h-8 w-8 -translate-x-1/2 animate-spin text-pmn-green" />
         </div>
-        <p className="text-gray-600 mt-6 font-medium">Chargement des documents...</p>
+        <p className="mt-6 font-medium text-pmn-subtle">Chargement des documents...</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-6 max-w-7xl mx-auto">
+    <div className="mx-auto max-w-[1320px] animate-fade-up space-y-[18px] px-6 pb-12 pt-[34px] md:px-10">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Arborescence des Documents</h1>
-          <p className="text-gray-600 mt-1">Organisez vos documents en dossiers et sous-dossiers</p>
+          <h1 className="text-[34px] font-semibold leading-tight tracking-[-.4px] text-pmn-ink-strong">
+            Arborescence des documents
+          </h1>
+          <p className="mt-[5px] text-[15px] text-pmn-subtle">
+            Organisez vos documents en dossiers et sous-dossiers
+          </p>
         </div>
       </div>
 
       {/* Search and Actions */}
-      <Card className="p-4 border-0 shadow-md bg-white">
-        <div className="flex flex-col md:flex-row gap-4 items-center">
-          <div className="flex-1 relative w-full">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
-            <Input
-              placeholder="Rechercher un document..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 bg-gray-50 border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-            />
-          </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-full md:w-[200px] bg-gray-50 border-gray-200">
-              <SelectValue placeholder="Toutes catégories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Toutes catégories</SelectItem>
-              {CATEGORIES.map(cat => (
-                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="flex gap-2 w-full md:w-auto">
-            <Button
-              onClick={() => setIsNewFolderDialogOpen(true)}
-              className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white shadow-md"
-            >
-              <FolderPlus className="h-4 w-4 mr-2" />
-              Nouveau dossier
-            </Button>
-            <div className="flex bg-gray-100 rounded-lg p-1 gap-1">
-              <Button
-                variant={viewMode === 'list' ? 'secondary' : 'ghost'}
-                size="icon"
-                className={`h-8 w-8 ${viewMode === 'list' ? 'shadow-sm' : ''}`}
-                onClick={() => handleViewModeChange('list')}
-                title="Liste"
-              >
-                <List className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={viewMode === 'large' ? 'secondary' : 'ghost'}
-                size="icon"
-                className={`h-8 w-8 ${viewMode === 'large' ? 'shadow-sm' : ''}`}
-                onClick={() => handleViewModeChange('large')}
-                title="Grandes icônes"
-              >
-                <Grid3X3 className="h-4 w-4" />
-              </Button>
-              <Button
-                variant={viewMode === 'very-large' ? 'secondary' : 'ghost'}
-                size="icon"
-                className={`h-8 w-8 ${viewMode === 'very-large' ? 'shadow-sm' : ''}`}
-                onClick={() => handleViewModeChange('very-large')}
-                title="Très grandes icônes"
-              >
-                <LayoutGrid className="h-4 w-4" />
-              </Button>
-            </div>
-            <Button
-              onClick={() => router.push('/dashboard/upload')}
-              className="flex-1 md:flex-none bg-blue-600 hover:bg-blue-700 text-white shadow-md"
-            >
-              <FilePlus className="h-4 w-4 mr-2" />
-              Nouveau document
-            </Button>
-          </div>
+      <div className="surface flex flex-col items-center gap-3 p-3.5 md:flex-row">
+        <div className="relative w-full min-w-0 flex-1 md:min-w-[240px]">
+          <Search className="absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-pmn-faint" strokeWidth={2} />
+          <Input
+            placeholder="Rechercher un document..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="h-11 rounded-[11px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] pl-10 text-sm focus:border-pmn-green focus:ring-pmn-green"
+          />
         </div>
-      </Card>
+        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+          <SelectTrigger className="h-11 w-full rounded-[11px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] text-sm font-medium text-pmn-text2 md:w-[190px]">
+            <SelectValue placeholder="Toutes catégories" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Toutes catégories</SelectItem>
+            {CATEGORIES.map(cat => (
+              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <div className="flex w-full gap-2 md:w-auto">
+          <Button
+            onClick={() => setIsNewFolderDialogOpen(true)}
+            variant="outline"
+            className="h-11 flex-1 rounded-[11px] border-pmn-green/30 bg-white text-sm font-semibold text-pmn-green hover:bg-pmn-green/[.06] hover:text-pmn-green md:flex-none"
+          >
+            <FolderPlus className="h-4 w-4 mr-2" />
+            Nouveau dossier
+          </Button>
+          <div className="flex h-11 gap-0.5 rounded-[11px] border border-[rgba(20,33,28,.07)] bg-[#F6F5F0] p-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-9 w-[34px] rounded-lg ${viewMode === 'list' ? 'bg-white text-pmn-green shadow-card hover:bg-white hover:text-pmn-green' : 'text-pmn-faint2 hover:bg-transparent hover:text-pmn-subtle'}`}
+              onClick={() => handleViewModeChange('list')}
+              title="Liste"
+            >
+              <List className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-9 w-[34px] rounded-lg ${viewMode === 'large' ? 'bg-white text-pmn-green shadow-card hover:bg-white hover:text-pmn-green' : 'text-pmn-faint2 hover:bg-transparent hover:text-pmn-subtle'}`}
+              onClick={() => handleViewModeChange('large')}
+              title="Grandes icônes"
+            >
+              <Grid3X3 className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`h-9 w-[34px] rounded-lg ${viewMode === 'very-large' ? 'bg-white text-pmn-green shadow-card hover:bg-white hover:text-pmn-green' : 'text-pmn-faint2 hover:bg-transparent hover:text-pmn-subtle'}`}
+              onClick={() => handleViewModeChange('very-large')}
+              title="Très grandes icônes"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
+          </div>
+          <Button
+            onClick={() => router.push('/dashboard/upload')}
+            className="h-11 flex-1 rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] text-sm font-semibold text-white shadow-cta transition-[filter] hover:brightness-110 md:flex-none"
+          >
+            <FilePlus className="h-4 w-4 mr-2" />
+            Nouveau document
+          </Button>
+        </div>
+      </div>
 
       {/* Content */}
       {filteredFolders.length === 0 && filteredDocuments.length === 0 ? (
-        <Card className="p-12 border-0 shadow-md bg-white">
+        <div className="surface p-12">
           <div className="text-center">
-            <div className="mx-auto h-24 w-24 rounded-full bg-gray-200 flex items-center justify-center mb-4">
-              <FileText className="h-12 w-12 text-gray-400" />
+            <div className="mx-auto mb-4 flex h-[72px] w-[72px] items-center justify-center rounded-[20px] bg-pmn-green/[.09] text-pmn-green">
+              <FileText className="h-8 w-8" strokeWidth={1.7} />
             </div>
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">
+            <h3 className="mb-2 text-[17px] font-bold text-pmn-ink">
               Aucun document disponible pour le moment
             </h3>
-            <p className="text-gray-600 mb-6">
+            <p className="mb-6 text-[13.5px] text-pmn-faint">
               Commencez par créer un dossier ou uploader vos premiers documents
             </p>
             <div className="flex gap-3 justify-center flex-wrap">
               <Button
                 onClick={() => setIsNewFolderDialogOpen(true)}
-                className="bg-green-600 hover:bg-green-700"
+                className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110"
               >
                 <FolderPlus className="h-4 w-4 mr-2" />
                 Créer un dossier
               </Button>
               <Button
                 onClick={() => router.push('/dashboard/upload')}
-                className="bg-yellow-500 hover:bg-yellow-600 text-gray-900"
+                className="rounded-[11px] bg-pmn-gold font-semibold text-[#3A2A00] hover:bg-pmn-gold-deep"
               >
                 <Upload className="h-4 w-4 mr-2" />
                 Uploader un fichier
               </Button>
             </div>
           </div>
-        </Card>
+        </div>
       ) : (
-        <Card className="border-0 shadow-md bg-white overflow-hidden">
+        <Card className="surface overflow-hidden rounded-[16px] border-0 p-0">
           {viewMode === 'list' ? (
             <DndContext
               sensors={sensors}
@@ -1283,19 +1287,18 @@ export default function DocumentsPage() {
                 items={folders.map(f => f.id)}
                 strategy={verticalListSortingStrategy}
               >
-                <div className="divide-y divide-gray-100">
+                <div className="divide-y divide-[rgba(20,33,28,.055)]">
                   {/* Folders List View */}
-                  {/* Recursive Folder Rendering */}
                   {/* Recursive Folder Rendering */}
                   {renderFolderRecursive(filteredFolders)}
                 </div>
               </SortableContext>
               <DragOverlay>
                 {activeDragId ? (
-                  <div className="bg-white p-4 rounded shadow-lg border border-blue-200 opacity-80">
+                  <div className="rounded-[11px] border border-pmn-gold/40 bg-white p-3 opacity-90 shadow-card-hover">
                     <div className="flex items-center gap-3">
-                      <Folder className="h-5 w-5 text-blue-600" />
-                      <span className="font-medium text-gray-900">
+                      <FolderGlyph size={28} />
+                      <span className="text-[14.5px] font-semibold text-pmn-ink">
                         {folders.find(f => f.id === activeDragId)?.name}
                       </span>
                     </div>
@@ -1304,12 +1307,12 @@ export default function DocumentsPage() {
               </DragOverlay>
             </DndContext>
           ) : (
-            <div className={`grid gap-6 p-6 ${viewMode === 'very-large' ? 'grid-cols-2 lg:grid-cols-3' : 'grid-cols-3 lg:grid-cols-4'}`}>
+            <div className={`grid gap-4 p-[18px] ${viewMode === 'very-large' ? 'grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
               {/* Folders Grid */}
               {filteredFolders.map((folder) => (
                 <Card
                   key={folder.id}
-                  className="group relative hover:shadow-lg transition-all duration-200 cursor-pointer border-2 hover:border-blue-500/20"
+                  className="group relative cursor-pointer rounded-[16px] border border-border bg-white p-0 shadow-card transition-all duration-200 hover:border-pmn-green/[.35] hover:shadow-card-hover"
                   onClick={() => {
                     handleViewModeChange('list');
                     if (!expandedFolders.has(folder.id)) {
@@ -1317,26 +1320,29 @@ export default function DocumentsPage() {
                     }
                   }}
                 >
-                  <CardContent className="p-6 flex flex-col items-center text-center space-y-4">
-                    <div className={`
-                      rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform duration-200
-                      ${viewMode === 'very-large' ? 'w-24 h-24' : 'w-16 h-16'}
-                    `}>
-                      <Folder className={viewMode === 'very-large' ? 'w-12 h-12' : 'w-8 h-8'} />
+                  <CardContent className="p-[18px]">
+                    <div className="flex items-center justify-between">
+                      <FolderGlyph size={viewMode === 'very-large' ? 64 : 48} />
+                      <span className="pill-archive rounded-[20px] px-2.5 py-[3px] text-[11.5px] font-semibold">
+                        {folder.status === 'Archive' || !folder.status ? 'Archivé' : folder.status}
+                      </span>
                     </div>
 
-                    <div className="space-y-2 w-full">
+                    <div className="mt-3.5 w-full space-y-2">
                       {folder.folder_number && (
-                        <Badge variant="secondary" className="font-mono text-xs bg-gray-100 text-gray-600">
+                        <span className="inline-block rounded-[5px] border border-[rgba(20,33,28,.06)] bg-[#F1F0EB] px-1.5 py-0.5 font-mono text-[11px] text-pmn-faint2">
                           {folder.folder_number}
-                        </Badge>
+                        </span>
                       )}
-                      <h3 className={`font-bold text-gray-900 truncate w-full ${viewMode === 'very-large' ? 'text-xl' : 'text-lg'}`}>
+                      <h3 className={`w-full truncate font-semibold leading-tight text-pmn-ink ${viewMode === 'very-large' ? 'text-[17px]' : 'text-[15px]'}`}>
                         {folder.name}
                       </h3>
-                      <p className="text-sm text-gray-500">
-                        {folder.category || 'Non classé'}
+                      <p className="flex items-center gap-1.5 text-xs text-pmn-faint">
+                        {format(new Date(folder.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                        {' · '}
+                        {getSubFolders(folder.id).length + (docsByFolder[folder.id]?.length ?? 0)} éléments
                       </p>
+                      <p className="text-xs text-pmn-faint">{folder.category || 'Non classé'}</p>
                     </div>
 
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1369,25 +1375,20 @@ export default function DocumentsPage() {
               {filteredDocuments.map((doc) => (
                 <Card
                   key={doc.id}
-                  className="group relative hover:shadow-lg transition-all duration-200 cursor-pointer border-2 hover:border-gray-500/20"
+                  className="group relative cursor-pointer rounded-[16px] border border-border bg-white p-0 shadow-card transition-all duration-200 hover:border-pmn-green/[.35] hover:shadow-card-hover"
                   onClick={() => {
                     setSelectedDocument(doc);
                     setIsPreviewDialogOpen(true);
                   }}
                 >
-                  <CardContent className="p-6 flex flex-col items-center text-center space-y-4">
-                    <div className={`
-                      rounded-2xl bg-gray-50 flex items-center justify-center text-gray-600 group-hover:scale-110 transition-transform duration-200
-                      ${viewMode === 'very-large' ? 'w-24 h-24' : 'w-16 h-16'}
-                    `}>
-                      <FileText className={viewMode === 'very-large' ? 'w-12 h-12' : 'w-8 h-8'} />
-                    </div>
+                  <CardContent className="p-[18px]">
+                    <FileTile name={doc.name} size={viewMode === 'very-large' ? 64 : 48} />
 
-                    <div className="space-y-2 w-full">
-                      <h3 className={`font-bold text-gray-900 truncate w-full ${viewMode === 'very-large' ? 'text-xl' : 'text-lg'}`}>
+                    <div className="mt-3.5 w-full space-y-2">
+                      <h3 className={`w-full truncate font-semibold leading-tight text-pmn-ink ${viewMode === 'very-large' ? 'text-[17px]' : 'text-[15px]'}`}>
                         {doc.name}
                       </h3>
-                      <p className="text-sm text-gray-500">
+                      <p className="text-xs text-pmn-faint">
                         {format(new Date(doc.createdAt), 'dd/MM/yyyy', { locale: fr })}
                       </p>
                     </div>
@@ -1443,7 +1444,7 @@ export default function DocumentsPage() {
             <Button variant="outline" onClick={() => setIsRenameDialogOpen(false)}>
               Annuler
             </Button>
-            <Button onClick={handleRename} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={handleRename} className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110">
               Renommer
             </Button>
           </DialogFooter>
@@ -1454,7 +1455,7 @@ export default function DocumentsPage() {
       <Dialog open={isNewFolderDialogOpen} onOpenChange={setIsNewFolderDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center text-blue-700">
+            <DialogTitle className="flex items-center text-pmn-green">
               <FolderPlus className="h-5 w-5 mr-2" />
               Créer un nouveau dossier
             </DialogTitle>
@@ -1491,7 +1492,7 @@ export default function DocumentsPage() {
             <Button variant="outline" onClick={() => setIsNewFolderDialogOpen(false)}>
               Annuler
             </Button>
-            <Button onClick={handleCreateFolder} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={handleCreateFolder} className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110">
               <FolderPlus className="h-4 w-4 mr-2" />
               Créer
             </Button>
@@ -1503,7 +1504,7 @@ export default function DocumentsPage() {
       <Dialog open={isNewSubFolderDialogOpen} onOpenChange={setIsNewSubFolderDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center text-blue-700">
+            <DialogTitle className="flex items-center text-pmn-green">
               <FolderPlus className="h-5 w-5 mr-2" />
               Créer un nouveau sous-dossier
             </DialogTitle>
@@ -1524,7 +1525,7 @@ export default function DocumentsPage() {
               />
             </div>
             {parentFolder && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <div className="rounded-[11px] border border-pmn-green/20 bg-pmn-green/[.06] p-3">
                 <p className="text-sm text-blue-900">
                   <span className="font-semibold">Dossier parent :</span> {parentFolder.name}
                 </p>
@@ -1547,7 +1548,7 @@ export default function DocumentsPage() {
             >
               Annuler
             </Button>
-            <Button onClick={handleCreateSubFolder} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={handleCreateSubFolder} className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110">
               <FolderPlus className="h-4 w-4 mr-2" />
               Créer
             </Button>
@@ -1559,7 +1560,7 @@ export default function DocumentsPage() {
       <Dialog open={isPreviewDialogOpen} onOpenChange={setIsPreviewDialogOpen}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center text-blue-700">
+            <DialogTitle className="flex items-center text-pmn-green">
               <Eye className="h-5 w-5 mr-2" />
               {selectedFolder ? 'Détails du dossier' : 'Détails du document'}
             </DialogTitle>
@@ -1630,7 +1631,7 @@ export default function DocumentsPage() {
       <Dialog open={isShareDialogOpen} onOpenChange={setIsShareDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center text-blue-700">
+            <DialogTitle className="flex items-center text-pmn-green">
               <Share2 className="h-5 w-5 mr-2" />
               Partager le document
             </DialogTitle>
@@ -1727,7 +1728,7 @@ export default function DocumentsPage() {
       <Dialog open={isModifyNumberDialogOpen} onOpenChange={setIsModifyNumberDialogOpen}>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center text-blue-700">
+            <DialogTitle className="flex items-center text-pmn-green">
               <Hash className="h-5 w-5 mr-2" />
               Modifier le numéro du dossier
             </DialogTitle>
@@ -1751,7 +1752,7 @@ export default function DocumentsPage() {
               </p>
             </div>
             {selectedFolder?.folder_number && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+              <div className="rounded-[11px] border border-pmn-green/20 bg-pmn-green/[.06] p-3">
                 <p className="text-sm text-blue-900">
                   <span className="font-semibold">Numéro actuel :</span> {selectedFolder.folder_number}
                 </p>
@@ -1766,7 +1767,7 @@ export default function DocumentsPage() {
             }}>
               Annuler
             </Button>
-            <Button onClick={handleModifyFolderNumber} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={handleModifyFolderNumber} className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110">
               <Hash className="h-4 w-4 mr-2" />
               Modifier
             </Button>
@@ -1806,7 +1807,7 @@ export default function DocumentsPage() {
       <Dialog open={isMoveDocumentDialogOpen} onOpenChange={setIsMoveDocumentDialogOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center text-blue-700">
+            <DialogTitle className="flex items-center text-pmn-green">
               <Folder className="h-5 w-5 mr-2" />
               Déplacer le document
             </DialogTitle>
@@ -1838,7 +1839,7 @@ export default function DocumentsPage() {
             <Button variant="outline" onClick={() => setIsMoveDocumentDialogOpen(false)}>
               Annuler
             </Button>
-            <Button onClick={handleMoveDocument} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={handleMoveDocument} className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110">
               Déplacer
             </Button>
           </DialogFooter>

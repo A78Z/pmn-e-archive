@@ -2,16 +2,9 @@
 
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import {
-    Folder,
-    GripVertical,
-    ChevronDown,
-    ChevronRight,
-    Loader2,
-    MoreVertical,
-} from 'lucide-react';
+import { GripVertical, ChevronRight, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { FolderGlyph } from '@/components/pmn-icons';
 import { ReactNode } from 'react';
 
 interface SortableFolderRowProps {
@@ -52,62 +45,62 @@ export function SortableFolderRow({
     return (
         <div ref={setNodeRef} style={style}>
             <div
-                className={`flex items-center gap-3 p-4 hover:bg-gray-50 transition-colors ${isOverThis ? 'bg-blue-50 border-l-4 border-blue-500' : ''
-                    }`}
+                className={`flex items-center gap-3 px-[18px] py-[9px] transition-colors duration-150 hover:bg-pmn-hover ${
+                    isOverThis ? 'bg-[rgba(228,180,41,.12)] border-l-4 border-pmn-gold' : ''
+                }`}
             >
                 {canMove && (
                     <div
-                        className="cursor-grab active:cursor-grabbing p-1 hover:bg-gray-200 rounded"
+                        className="cursor-grab active:cursor-grabbing p-1 rounded flex-none text-[#B7BEB9] hover:text-pmn-subtle"
                         {...attributes}
                         {...listeners}
                     >
-                        <GripVertical className="h-4 w-4 text-gray-400" />
+                        <GripVertical className="h-4 w-4" />
                     </div>
                 )}
                 <button
                     onClick={onToggle}
-                    className="p-1 hover:bg-gray-200 rounded transition-colors"
+                    className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-md text-pmn-subtle transition-colors hover:bg-[rgba(20,33,28,.06)]"
                 >
-                    {isExpanded ? (
-                        <ChevronDown className="h-5 w-5 text-gray-600" />
-                    ) : (
-                        <ChevronRight className="h-5 w-5 text-gray-600" />
-                    )}
+                    <span
+                        className="inline-flex transition-transform duration-200"
+                        style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
+                    >
+                        <ChevronRight className="h-4 w-4" strokeWidth={2.2} />
+                    </span>
                 </button>
 
                 <div
-                    className={`flex items-center gap-3 flex-1 min-w-0 ${folder._isCreating ? 'opacity-60' : ''
-                        }`}
+                    className={`flex items-center gap-3 flex-1 min-w-0 ${
+                        folder._isCreating ? 'opacity-60' : ''
+                    }`}
                 >
-                    <Folder
-                        className={`h-5 w-5 ${folder._isCreating ? 'text-gray-400' : 'text-blue-600'
-                            } flex-shrink-0`}
-                    />
+                    <FolderGlyph size={36} />
                     <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-[9px]">
                             {folder.folder_number && (
-                                <span className="text-xs font-mono bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">
+                                <span className="flex-none rounded-[5px] border border-[rgba(20,33,28,.06)] bg-[#F1F0EB] px-1.5 py-0.5 font-mono text-[11px] text-pmn-faint2">
                                     {folder.folder_number}
                                 </span>
                             )}
-                            <h3 className="font-semibold text-gray-900 truncate">
+                            <h3 className="truncate text-[14.5px] font-semibold text-pmn-ink">
                                 {folder.name}
                             </h3>
                             {folder._isCreating && (
-                                <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                <Badge variant="outline" className="bg-pmn-green/5 text-pmn-green border-pmn-green/20">
                                     <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                                     Création...
                                 </Badge>
                             )}
                         </div>
-                        <p className="text-sm text-gray-500">
+                        <p className="mt-0.5 text-xs text-pmn-faint">
                             {folder.createdAt && new Date(folder.createdAt).toLocaleDateString('fr-FR')}
                         </p>
                     </div>
                     {folder.status && !folder._isCreating && (
-                        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
-                            {folder.status}
-                        </Badge>
+                        <span className="pill-archive flex-none rounded-[20px] px-[11px] py-[3px] text-[11.5px] font-semibold">
+                            {folder.status === 'Archive' ? 'Archivé' : folder.status}
+                        </span>
                     )}
                 </div>
 

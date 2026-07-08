@@ -13,6 +13,7 @@ import { Parse } from '@/lib/parse';
 import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { sanitizeFilenames, needsSanitization, validateFilename } from '@/lib/filename-utils';
+import { ExtBadge } from '@/components/pmn-icons';
 
 interface FolderOption {
   id: string;
@@ -375,55 +376,56 @@ export default function UploadPage() {
     : 0;
 
   return (
-    <div className="space-y-6 p-6 max-w-7xl mx-auto">
+    <div className="mx-auto max-w-[960px] animate-fade-up space-y-5 px-6 pb-12 pt-[34px] md:px-10">
       <div>
-        <h1 className="text-3xl font-bold text-gray-900">Uploader</h1>
-        <p className="text-gray-600 mt-1">Téléchargez de nouveaux documents</p>
+        <h1 className="text-[34px] font-semibold leading-tight tracking-[-.4px] text-pmn-ink-strong">
+          Uploader des documents
+        </h1>
+        <p className="mt-[5px] text-[15px] text-pmn-subtle">
+          Ajoutez vos fichiers à l&apos;archive et classez-les par catégorie
+        </p>
       </div>
 
-      <div className="space-y-6">
+      <div className="surface space-y-6 p-[26px]">
         <div className="space-y-2">
-          <Label className="text-base font-semibold">
-            Fichiers <span className="text-red-500">*</span>
-          </Label>
-
           <div
-            className={`border-2 border-dashed rounded-lg p-12 transition-colors ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-gray-300 bg-gray-50'
+            className={`rounded-[14px] border-2 border-dashed p-12 transition-colors ${isDragging
+              ? 'border-pmn-gold bg-pmn-gold/[.06]'
+              : 'border-pmn-green/[.28] bg-[linear-gradient(180deg,rgba(21,101,75,.03),rgba(228,180,41,.03))]'
               }`}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
           >
             <div className="flex flex-col items-center justify-center space-y-4">
-              <div className="w-16 h-16 rounded-full bg-gray-200 flex items-center justify-center">
-                <FileText className="w-8 h-8 text-gray-500" />
+              <div className="flex h-[72px] w-[72px] items-center justify-center rounded-[20px] bg-pmn-green/10 text-pmn-green">
+                <Upload className="h-[34px] w-[34px]" strokeWidth={1.8} />
               </div>
 
               <div className="text-center">
-                <p className="text-base font-medium text-gray-900 mb-1">
-                  Cliquez pour sélectionner ou glissez vos fichiers ici
+                <p className="text-lg font-bold text-pmn-ink">
+                  Glissez vos fichiers ici
                 </p>
-                <p className="text-sm text-gray-500">
-                  Supports: PDF, DOC, DOCX, JPG, PNG (max. 50MB par fichier)
+                <p className="mt-1.5 text-[13.5px] text-pmn-faint">
+                  ou parcourez votre ordinateur — PDF, Word, Excel, images (max 50 Mo)
                 </p>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex flex-wrap justify-center gap-3">
                 <Button
                   type="button"
-                  variant="outline"
                   onClick={handleFileSelect}
-                  className="gap-2"
+                  className="h-11 gap-2 rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] px-[22px] text-sm font-semibold text-white shadow-cta transition-[filter] hover:brightness-110"
                   disabled={uploading}
                 >
-                  <FileText className="w-4 h-4" />
-                  Sélectionner des fichiers
+                  <Upload className="w-4 h-4" />
+                  Parcourir les fichiers
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   onClick={handleFolderSelect}
-                  className="gap-2"
+                  className="h-11 gap-2 rounded-[11px] border-pmn-green/30 text-sm font-semibold text-pmn-green hover:bg-pmn-green/[.06] hover:text-pmn-green"
                   disabled={uploading}
                 >
                   <Folder className="w-4 h-4" />
@@ -454,16 +456,19 @@ export default function UploadPage() {
           {fileStates.length > 0 && (
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-gray-700">
-                  {totalFiles} fichier(s) • {successCount} réussi(s) • {errorCount} échoué(s)
-                </p>
+                <div>
+                  <p className="text-base font-bold text-pmn-ink">Fichiers en cours</p>
+                  <p className="text-[12.5px] text-pmn-faint">
+                    {totalFiles} fichier(s) sélectionné(s) • {successCount} réussi(s) • {errorCount} échoué(s)
+                  </p>
+                </div>
                 {errorCount > 0 && !uploading && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={retryFailedFiles}
-                    className="gap-2"
+                    className="gap-2 rounded-[9px] border-pmn-green/30 text-pmn-green hover:bg-pmn-green/[.06] hover:text-pmn-green"
                   >
                     <RefreshCw className="w-4 h-4" />
                     Relancer les fichiers échoués
@@ -471,29 +476,24 @@ export default function UploadPage() {
                 )}
               </div>
 
-              <div className="space-y-1 max-h-96 overflow-y-auto">
+              <div className="max-h-96 overflow-y-auto">
                 {fileStates.map((fileState, index) => (
                   <div
                     key={index}
-                    className={`flex items-center justify-between border rounded-md px-3 py-2 text-sm ${fileState.status === 'success' ? 'bg-green-50 border-green-200' :
-                      fileState.status === 'error' ? 'bg-red-50 border-red-200' :
-                        fileState.status === 'uploading' ? 'bg-blue-50 border-blue-200' :
-                          'bg-white'
-                      }`}
+                    className={`flex items-center justify-between gap-3 border-t border-[rgba(20,33,28,.06)] px-1 py-[13px] text-sm ${
+                      fileState.status === 'error' ? 'bg-red-50/50' : ''
+                    }`}
                   >
-                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                      {fileState.status === 'success' && (
-                        <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
-                      )}
-                      {fileState.status === 'error' && (
-                        <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
-                      )}
-                      {fileState.status === 'uploading' && (
-                        <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                      )}
-                      {fileState.status === 'pending' && (
-                        <FileText className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                      )}
+                    <div className="flex items-center gap-3.5 flex-1 min-w-0">
+                      <div className="relative flex-none">
+                        <ExtBadge name={fileState.sanitizedName} size={40} />
+                        {fileState.status === 'success' && (
+                          <CheckCircle className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-white text-pmn-online" />
+                        )}
+                        {fileState.status === 'error' && (
+                          <AlertCircle className="absolute -right-1 -top-1 h-4 w-4 rounded-full bg-white text-destructive" />
+                        )}
+                      </div>
 
                       <div className="flex-1 min-w-0">
                         {fileState.status === 'error' && fileState.error?.includes('interdits') ? (
@@ -501,7 +501,7 @@ export default function UploadPage() {
                             <Input
                               value={fileState.sanitizedName}
                               onChange={(e) => handleRename(index, e.target.value)}
-                              className="h-7 text-sm py-0 px-2 w-full max-w-md border-red-300 focus:border-red-500"
+                              className="h-7 w-full max-w-md rounded-[9px] border-red-300 px-2 py-0 text-sm focus:border-red-500"
                             />
                             <Button
                               size="sm"
@@ -513,35 +513,40 @@ export default function UploadPage() {
                             </Button>
                           </div>
                         ) : (
-                          <p className={`truncate font-medium ${fileState.status === 'error' ? 'text-red-700' : 'text-gray-700'}`}>
+                          <p className={`truncate text-sm font-semibold ${fileState.status === 'error' ? 'text-destructive' : 'text-pmn-ink'}`}>
                             {fileState.sanitizedName}
                           </p>
                         )}
 
                         {fileState.status === 'error' && (
-                          <p className="text-xs text-red-600 mt-0.5">
+                          <p className="mt-0.5 text-xs text-destructive">
                             {fileState.error}
                           </p>
                         )}
-                        {fileState.status === 'uploading' && (
-                          <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1.5">
+                        {(fileState.status === 'uploading' || fileState.status === 'success') && (
+                          <div className="mt-2 h-[7px] w-full overflow-hidden rounded-md bg-[#EDECE6]">
                             <div
-                              className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                              style={{ width: `${fileState.progress}%` }}
+                              className="h-full rounded-md bg-gradient-to-r from-[#1F8A63] to-[#15654B] transition-all duration-300"
+                              style={{ width: `${fileState.status === 'success' ? 100 : fileState.progress}%` }}
                             />
                           </div>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 ml-4">
-                      <span className="text-xs text-gray-500 whitespace-nowrap">
+                    <div className="ml-2 flex flex-none items-center gap-3">
+                      <span className="whitespace-nowrap text-xs text-pmn-faint">
                         {(fileState.file.size / 1024).toFixed(1)} KB
                       </span>
+                      {fileState.status === 'uploading' && (
+                        <span className="w-[42px] text-right text-[12.5px] font-semibold text-pmn-green">
+                          {fileState.progress}%
+                        </span>
+                      )}
                       {!uploading && fileState.status !== 'success' && (
                         <button
                           onClick={() => removeFile(index)}
-                          className="text-gray-400 hover:text-gray-600"
+                          className="text-pmn-faint transition-colors hover:text-pmn-subtle"
                         >
                           <X className="w-4 h-4" />
                         </button>
@@ -555,23 +560,23 @@ export default function UploadPage() {
 
           {/* Overall progress */}
           {uploading && (
-            <div className="mt-6 space-y-3 bg-blue-50 border-2 border-blue-200 rounded-lg p-5">
+            <div className="mt-6 space-y-3 rounded-[14px] border border-pmn-green/20 bg-pmn-green/[.05] p-5">
               <div className="flex items-center justify-between">
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold text-blue-900">
+                  <p className="text-sm font-bold text-pmn-green-dark">
                     Upload en cours...
                   </p>
-                  <p className="text-xs text-blue-700">
+                  <p className="text-xs text-pmn-green">
                     {successCount} / {totalFiles} fichiers uploadés
                   </p>
                 </div>
-                <span className="text-2xl font-bold text-blue-600">
+                <span className="font-display text-2xl font-semibold text-pmn-green">
                   {overallProgress}%
                 </span>
               </div>
-              <div className="w-full bg-blue-200 rounded-full h-3 overflow-hidden">
+              <div className="h-3 w-full overflow-hidden rounded-full bg-pmn-green/15">
                 <div
-                  className="h-full bg-blue-600 transition-all duration-300 ease-out rounded-full"
+                  className="h-full rounded-full bg-gradient-to-r from-[#1F8A63] to-[#15654B] transition-all duration-300 ease-out"
                   style={{ width: `${overallProgress}%` }}
                 />
               </div>
@@ -585,7 +590,7 @@ export default function UploadPage() {
               Catégorie <span className="text-red-500">*</span> (pour tous les fichiers)
             </Label>
             <Select value={category} onValueChange={(value) => setCategory(value)}>
-              <SelectTrigger className="h-11 border-2 border-green-600">
+              <SelectTrigger className="h-[46px] rounded-[11px] border-[rgba(20,33,28,.08)] bg-[#F6F5F0] text-sm">
                 <SelectValue placeholder="Sélectionner une catégorie" />
               </SelectTrigger>
               <SelectContent>
@@ -614,7 +619,7 @@ export default function UploadPage() {
               Dossier de destination
             </Label>
             <Select value={destinationFolder} onValueChange={(value) => setDestinationFolder(value === 'root' ? undefined : value)}>
-              <SelectTrigger className="h-11">
+              <SelectTrigger className="h-[46px] rounded-[11px] border-[rgba(20,33,28,.08)] bg-[#F6F5F0] text-sm">
                 <SelectValue placeholder="Racine (aucun dossier)" />
               </SelectTrigger>
               <SelectContent className="max-h-[40vh] overflow-y-auto">
@@ -670,7 +675,7 @@ export default function UploadPage() {
             type="button"
             onClick={handleUpload}
             disabled={uploading || fileStates.length === 0 || !category || pendingCount === 0}
-            className="h-11 px-6 bg-green-600 hover:bg-green-700 gap-2 w-full sm:w-auto"
+            className="h-11 w-full gap-2 rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] px-6 font-semibold text-white shadow-cta transition-[filter] hover:brightness-110 sm:w-auto"
           >
             <Upload className="w-4 h-4" />
             {uploading
