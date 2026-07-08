@@ -124,7 +124,13 @@ export default function DocumentsPage() {
   const router = useRouter();
   const { profile } = useAuth();
   const [folders, setFolders] = useState<Folder[]>([]);
+  // Documents à la racine (sans folder_id) uniquement — les documents des
+  // dossiers sont chargés à la demande dans docsByFolder (voir ci-dessous).
   const [documents, setDocuments] = useState<Document[]>([]);
+  // Cache des documents par dossier : chargés au dépliage, conservés ensuite.
+  const [docsByFolder, setDocsByFolder] = useState<Record<string, Document[]>>({});
+  const [loadingFolderIds, setLoadingFolderIds] = useState<Set<string>>(new Set());
+  const [folderErrors, setFolderErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -193,16 +199,10 @@ export default function DocumentsPage() {
     localStorage.setItem('pmn_folder_view_mode', mode);
   };
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (profile) {
-        fetchFolders();
-        fetchDocuments();
-      }
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [profile]);
+  // NOTE: l'ancien polling (10 s) rechargeait TOUS les documents à chaque cycle
+  // (requête massive) et écrasait l'état local. Supprimé : les données sont
+  // rafraîchies de manière ciblée après chaque action (création, renommage,
+  // suppression, déplacement).
 
   const fetchFolders = async () => {
     try {
@@ -222,21 +222,62 @@ export default function DocumentsPage() {
 
       console.log(`✅ Fetched ${foldersData.length} folders`);
       setFolders(foldersData as Folder[]);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading folders:', error);
-      toast.error('Erreur lors du chargement des dossiers');
+      toast.error(`Erreur lors du chargement des dossiers${error?.message ? ` : ${error.message}` : ''}`);
     }
   };
 
+  // Charge UNIQUEMENT les documents à la racine (sans dossier).
+  // Les documents des dossiers sont chargés à la demande via fetchFolderDocuments,
+  // ce qui évite la requête massive (3894 docs) qui tronquait/échouait auparavant.
   const fetchDocuments = async () => {
     try {
-      const documentsData = await DocumentHelpers.getAll();
+      const documentsData = await DocumentHelpers.getByFolder(null);
       setDocuments(documentsData as Document[]);
-    } catch (error) {
-      console.error('Error loading data:', error);
-      toast.error('Erreur lors du chargement des données');
+    } catch (error: any) {
+      console.error('Error loading root documents:', error);
+      toast.error(`Erreur lors du chargement des données${error?.message ? ` : ${error.message}` : ''}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Charge les documents d'un dossier donné (au dépliage), avec cache.
+  const fetchFolderDocuments = async (folderId: string, force = false) => {
+    if (!force && docsByFolder[folderId]) return;
+
+    setLoadingFolderIds(prev => new Set(prev).add(folderId));
+    setFolderErrors(prev => {
+      if (!(folderId in prev)) return prev;
+      const next = { ...prev };
+      delete next[folderId];
+      return next;
+    });
+
+    try {
+      const docs = await DocumentHelpers.getByFolder(folderId);
+      setDocsByFolder(prev => ({ ...prev, [folderId]: docs as Document[] }));
+    } catch (error: any) {
+      console.error(`Error loading documents for folder ${folderId}:`, error);
+      setFolderErrors(prev => ({ ...prev, [folderId]: error?.message || 'Erreur de chargement' }));
+    } finally {
+      setLoadingFolderIds(prev => {
+        const next = new Set(prev);
+        next.delete(folderId);
+        return next;
+      });
+    }
+  };
+
+  // Rafraîchit le conteneur d'un document (racine ou dossier chargé en cache).
+  const refreshDocumentContainer = (folderId?: string | null) => {
+    if (folderId) {
+      if (docsByFolder[folderId]) {
+        fetchFolderDocuments(folderId, true);
+      }
+    } else {
+      fetchDocuments();
     }
   };
 
@@ -501,6 +542,9 @@ export default function DocumentsPage() {
   const handleRename = async () => {
     if (!renameValue.trim()) return;
 
+    // Capturé avant la remise à zéro des états pour rafraîchir le bon conteneur
+    const renamedDocument = selectedDocument;
+
     try {
       if (selectedFolder) {
         if (!canRename(profile, selectedFolder)) {
@@ -527,7 +571,10 @@ export default function DocumentsPage() {
       setSelectedDocument(null);
       setRenameValue('');
       fetchFolders();
-      fetchDocuments();
+      // Rafraîchissement ciblé : uniquement le conteneur du document renommé
+      if (renamedDocument) {
+        refreshDocumentContainer(renamedDocument.folder_id);
+      }
     } catch (error) {
       console.error('Error renaming:', error);
       toast.error('Erreur lors du renommage');
@@ -566,24 +613,40 @@ export default function DocumentsPage() {
   const confirmDelete = async () => {
     if (!itemToDelete) return;
 
+    // Localiser le conteneur du document AVANT suppression (racine ou dossier en cache)
+    const documentContainerId =
+      itemToDelete.type === 'document' && !documents.some(d => d.id === itemToDelete.id)
+        ? Object.keys(docsByFolder).find(fid =>
+            docsByFolder[fid].some(d => d.id === itemToDelete.id)
+          ) ?? null
+        : null;
+
     try {
       if (itemToDelete.type === 'folder') {
         await FolderHelpers.delete(itemToDelete.id);
+        // Purger le cache du dossier supprimé
+        setDocsByFolder(prev => {
+          if (!(itemToDelete.id in prev)) return prev;
+          const next = { ...prev };
+          delete next[itemToDelete.id];
+          return next;
+        });
         toast.success('Dossier supprimé');
+        fetchFolders();
       } else {
         await DocumentHelpers.delete(itemToDelete.id);
         toast.success('Document supprimé');
+        // Rafraîchissement ciblé du conteneur concerné uniquement
+        refreshDocumentContainer(documentContainerId);
       }
       setIsDeleteDialogOpen(false);
       setItemToDelete(null);
-      fetchFolders();
-      fetchDocuments();
 
       // Trigger dashboard refresh to update stats in real-time
       window.dispatchEvent(new Event('refreshDashboard'));
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting item:', error);
-      toast.error('Erreur lors de la suppression');
+      toast.error(`Erreur lors de la suppression${error?.message ? ` : ${error.message}` : ''}`);
     }
   };
 
@@ -615,27 +678,27 @@ export default function DocumentsPage() {
     if (!selectedDocument) return;
 
     try {
-      const targetFolderId = moveTargetFolderId === 'root' ? undefined : moveTargetFolderId;
+      const sourceFolderId = selectedDocument.folder_id || null;
+      const targetFolderId = moveTargetFolderId === 'root' ? null : moveTargetFolderId;
 
       // Update in backend
       await DocumentHelpers.update(selectedDocument.id, {
-        folder_id: targetFolderId || null // Ensure backend gets null if undefined, assuming backend handles null
+        folder_id: targetFolderId
       });
 
-      // Update local state
-      setDocuments(docs => docs.map(d =>
-        d.id === selectedDocument.id
-          ? { ...d, folder_id: targetFolderId }
-          : d
-      ));
+      // Rafraîchir les conteneurs source et destination (racine ou cache)
+      refreshDocumentContainer(sourceFolderId);
+      if (targetFolderId !== sourceFolderId) {
+        refreshDocumentContainer(targetFolderId);
+      }
 
       toast.success('Document déplacé avec succès');
       setIsMoveDocumentDialogOpen(false);
       setSelectedDocument(null);
       setMoveTargetFolderId('root');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error moving document:', error);
-      toast.error('Erreur lors du déplacement du document');
+      toast.error(`Erreur lors du déplacement du document${error?.message ? ` : ${error.message}` : ''}`);
     }
   };
 
@@ -786,22 +849,19 @@ export default function DocumentsPage() {
       newExpanded.delete(folderId);
     } else {
       newExpanded.add(folderId);
+      // Chargement à la demande : les documents du dossier sont récupérés
+      // au premier dépliage puis mis en cache.
+      fetchFolderDocuments(folderId);
     }
     setExpandedFolders(newExpanded);
   };
 
   const getDocumentsInFolder = (folderId: string) => {
-    return documents.filter(doc => doc.folder_id === folderId);
+    return docsByFolder[folderId] ?? [];
   };
 
   const getSubFolders = (parentId: string) => {
-    const subfolders = folders.filter(folder => folder.parent_id === parentId);
-    if (subfolders.length === 0) {
-      console.log(`getSubFolders(${parentId}): No subfolders found. Total folders: ${folders.length}`);
-    } else {
-      console.log(`getSubFolders(${parentId}): Found ${subfolders.length} subfolders`);
-    }
-    return subfolders;
+    return folders.filter(folder => folder.parent_id === parentId);
   };
 
   const filteredFolders = folders.filter(folder => {
@@ -933,6 +993,37 @@ export default function DocumentsPage() {
           {/* Children: Subfolders and Documents */}
           {isExpanded && (
             <div className="border-t border-gray-100">
+              {/* Loading state while this folder's documents are being fetched */}
+              {loadingFolderIds.has(folder.id) && !docsByFolder[folder.id] && (
+                <div
+                  className="p-4 text-sm text-gray-500 flex items-center gap-2"
+                  style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }}
+                >
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Chargement des documents...
+                </div>
+              )}
+
+              {/* Error state with retry, instead of a misleading empty folder */}
+              {folderErrors[folder.id] && (
+                <div
+                  className="p-4 text-sm text-red-600 flex items-center gap-3 flex-wrap"
+                  style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }}
+                >
+                  <span>Erreur de chargement : {folderErrors[folder.id]}</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fetchFolderDocuments(folder.id, true);
+                    }}
+                  >
+                    Réessayer
+                  </Button>
+                </div>
+              )}
+
               {/* Recursive Subfolders - RENDERED FIRST */}
               {subFolders.length > 0 && renderFolderRecursive(subFolders, depth + 1)}
 
@@ -1032,14 +1123,19 @@ export default function DocumentsPage() {
                 </div>
               ))}
 
-              {subFolders.length === 0 && docs.length === 0 && (
-                <div
-                  className="p-4 text-sm text-gray-500 italic"
-                  style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }}
-                >
-                  Dossier vide
-                </div>
-              )}
+              {/* "Dossier vide" uniquement lorsque le chargement est terminé sans erreur */}
+              {subFolders.length === 0 &&
+                docs.length === 0 &&
+                !loadingFolderIds.has(folder.id) &&
+                !folderErrors[folder.id] &&
+                docsByFolder[folder.id] !== undefined && (
+                  <div
+                    className="p-4 text-sm text-gray-500 italic"
+                    style={{ paddingLeft: `${Math.min((depth + 1) * 1.5 + 1, 8)}rem` }}
+                  >
+                    Dossier vide
+                  </div>
+                )}
             </div>
           )}
         </div>

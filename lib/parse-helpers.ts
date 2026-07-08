@@ -77,11 +77,17 @@ export const DocumentHelpers = {
     },
 
     async getByFolder(folderId: string | null) {
-        const query = new Parse.Query(ParseClasses.DOCUMENT);
+        let query: Parse.Query;
         if (folderId) {
+            query = new Parse.Query(ParseClasses.DOCUMENT);
             query.equalTo('folder_id', folderId);
         } else {
-            query.doesNotExist('folder_id');
+            // Racine : couvrir à la fois folder_id absent ET folder_id === null
+            const missing = new Parse.Query(ParseClasses.DOCUMENT);
+            missing.doesNotExist('folder_id');
+            const nullValue = new Parse.Query(ParseClasses.DOCUMENT);
+            nullValue.equalTo('folder_id', null);
+            query = Parse.Query.or(missing, nullValue);
         }
         query.descending('createdAt');
         query.limit(1000); // Increased limit to ensure all files are fetched
