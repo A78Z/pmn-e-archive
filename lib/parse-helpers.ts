@@ -102,6 +102,13 @@ export const DocumentHelpers = {
         const results = await query.find();
         return results.map(parseObjectToJSON);
     },
+
+    /** Comptage léger des documents d'un dossier (aucun objet chargé). */
+    async countByFolder(folderId: string) {
+        const query = new Parse.Query(ParseClasses.DOCUMENT);
+        query.equalTo('folder_id', folderId);
+        return await query.count();
+    },
 };
 
 // Folder helpers

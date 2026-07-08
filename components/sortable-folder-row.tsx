@@ -15,6 +15,10 @@ interface SortableFolderRowProps {
     onToggle: () => void;
     children: ReactNode;
     style?: React.CSSProperties;
+    /** Nombre de sous-dossiers (calcul local, toujours connu) */
+    subCount?: number;
+    /** Nombre de documents (count() en cache ; undefined = pas encore connu) */
+    docCount?: number;
 }
 
 export function SortableFolderRow({
@@ -25,6 +29,8 @@ export function SortableFolderRow({
     onToggle,
     children,
     style: propStyle,
+    subCount,
+    docCount,
 }: SortableFolderRowProps) {
     const {
         attributes,
@@ -95,6 +101,12 @@ export function SortableFolderRow({
                         </div>
                         <p className="mt-0.5 text-xs text-pmn-faint">
                             {folder.createdAt && new Date(folder.createdAt).toLocaleDateString('fr-FR')}
+                            {subCount !== undefined && (
+                                <span> · {subCount} sous-dossier{subCount > 1 ? 's' : ''}</span>
+                            )}
+                            {docCount !== undefined && (
+                                <span> · {docCount} document{docCount > 1 ? 's' : ''}</span>
+                            )}
                         </p>
                     </div>
                     {folder.status && !folder._isCreating && (

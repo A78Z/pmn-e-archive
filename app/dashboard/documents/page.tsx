@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -24,8 +24,11 @@ import {
   LayoutGrid,
   Grid3X3,
   List,
-  Hash
+  Hash,
+  FolderInput,
+  ArrowUpDown
 } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/lib/parse-auth';
 import { FolderHelpers, DocumentHelpers, UserHelpers, ShareHelpers } from '@/lib/parse-helpers';
 import {
@@ -69,7 +72,6 @@ import {
   DragOverEvent,
 } from '@dnd-kit/core';
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
@@ -154,6 +156,22 @@ export default function DocumentsPage() {
   const [selectedDocument, setSelectedDocument] = useState<Document | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<{ type: 'folder' | 'document', id: string, name: string } | null>(null);
+
+  // ===== Déplacement sécurisé de dossiers =====
+  // Confirmation avant écriture (drag & drop) : rien n'est enregistré tant que
+  // l'utilisateur n'a pas confirmé.
+  const [pendingMove, setPendingMove] = useState<{ folder: Folder; targetId: string | null; targetName: string } | null>(null);
+  // « Déplacer vers… » (menu ⋮) : sélecteur de destination
+  const [isMoveFolderDialogOpen, setIsMoveFolderDialogOpen] = useState(false);
+  const [folderToMove, setFolderToMove] = useState<Folder | null>(null);
+  const [moveFolderTargetId, setMoveFolderTargetId] = useState<string>('root');
+
+  // ===== Tri de l'affichage (aucune modification de données) =====
+  const [sortBy, setSortBy] = useState<'name-asc' | 'name-desc' | 'date-desc' | 'date-asc'>('name-asc');
+
+  // ===== Compteurs de documents par dossier (count() léger, mis en cache) =====
+  const [docCounts, setDocCounts] = useState<Record<string, number>>({});
+  const countsInFlight = useRef<Set<string>>(new Set());
   const [isModifyNumberDialogOpen, setIsModifyNumberDialogOpen] = useState(false);
   const [newFolderNumber, setNewFolderNumber] = useState('');
 
@@ -173,8 +191,11 @@ export default function DocumentsPage() {
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
+      // Drag délibéré : maintien 150 ms avant activation (évite les
+      // déplacements accidentels au simple clic), tolérance 5 px.
       activationConstraint: {
-        distance: 8,
+        delay: 150,
+        tolerance: 5,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -188,12 +209,65 @@ export default function DocumentsPage() {
     if (savedViewMode) {
       setViewMode(savedViewMode as any);
     }
+    const savedSort = localStorage.getItem('pmn_folder_sort');
+    if (savedSort && ['name-asc', 'name-desc', 'date-desc', 'date-asc'].includes(savedSort)) {
+      setSortBy(savedSort as any);
+    }
     if (profile) {
       fetchFolders();
       fetchDocuments();
       fetchUsers();
     }
   }, [profile]);
+
+  const handleSortChange = (value: string) => {
+    setSortBy(value as any);
+    localStorage.setItem('pmn_folder_sort', value);
+  };
+
+  // Compteurs de documents : count() léger pour les dossiers actuellement
+  // rendus (racine + enfants des dossiers dépliés), par lots de 8, avec cache.
+  // Aucun chargement massif : seuls des comptages sont demandés.
+  useEffect(() => {
+    if (folders.length === 0) return;
+
+    const rendered = folders.filter(f => !f.parent_id || expandedFolders.has(f.parent_id));
+    const need = rendered
+      .filter(f =>
+        docCounts[f.id] === undefined &&
+        docsByFolder[f.id] === undefined &&
+        !countsInFlight.current.has(f.id)
+      )
+      .slice(0, 8);
+
+    if (need.length === 0) return;
+
+    need.forEach(f => countsInFlight.current.add(f.id));
+    Promise.all(
+      need.map(async f => {
+        try {
+          return [f.id, await DocumentHelpers.countByFolder(f.id)] as const;
+        } catch (e) {
+          console.warn(`countByFolder(${f.id}) failed:`, e);
+          return [f.id, undefined] as const;
+        }
+      })
+    ).then(results => {
+      setDocCounts(prev => {
+        const next = { ...prev };
+        results.forEach(([id, count]) => {
+          if (count !== undefined) next[id] = count;
+        });
+        return next;
+      });
+      results.forEach(([id]) => countsInFlight.current.delete(id));
+    });
+  }, [folders, expandedFolders, docCounts, docsByFolder]);
+
+  // Nombre de documents connu pour un dossier : cache de contenu (exact,
+  // prioritaire) sinon cache de comptage.
+  const getDocCount = (folderId: string): number | undefined =>
+    docsByFolder[folderId]?.length ?? docCounts[folderId];
 
   const handleViewModeChange = (mode: 'list' | 'large' | 'very-large') => {
     setViewMode(mode);
@@ -433,6 +507,129 @@ export default function DocumentsPage() {
     return ['super_admin', 'admin'].includes(userProfile.role) || folder.created_by === userProfile.id;
   };
 
+  // Tous les descendants d'un dossier (garde-fou anti-cycle côté UI)
+  const getDescendantIds = (folderId: string): Set<string> => {
+    const ids = new Set<string>();
+    const walk = (parentId: string) => {
+      folders.forEach(f => {
+        if (f.parent_id === parentId && !ids.has(f.id)) {
+          ids.add(f.id);
+          walk(f.id);
+        }
+      });
+    };
+    walk(folderId);
+    return ids;
+  };
+
+  /**
+   * Exécute un déplacement CONFIRMÉ de dossier (drag & drop ou « Déplacer vers… »).
+   * - Mémorise l'ancien parent_id AVANT écriture → toast « Annuler » (10 s)
+   *   qui restaure exactement la position d'origine.
+   * - Seul le champ parent_id est modifié (FolderHelpers.move).
+   */
+  const executeMove = async (folder: Folder, targetId: string | null, targetName: string) => {
+    const previousParentId = folder.parent_id ?? null;
+
+    try {
+      await FolderHelpers.move(folder.id, targetId);
+
+      // Déplier la destination pour montrer le résultat
+      if (targetId) {
+        setExpandedFolders(prev => new Set(prev).add(targetId));
+      }
+      await fetchFolders();
+
+      toast.success(
+        targetId
+          ? `« ${folder.name} » déplacé dans « ${targetName} »`
+          : `« ${folder.name} » déplacé à la racine`,
+        {
+          duration: 10000,
+          action: {
+            label: 'Annuler',
+            onClick: async () => {
+              try {
+                await FolderHelpers.move(folder.id, previousParentId);
+                if (previousParentId) {
+                  setExpandedFolders(prev => new Set(prev).add(previousParentId));
+                }
+                await fetchFolders();
+                toast.success(`« ${folder.name} » est revenu à sa place d'origine`);
+              } catch (undoError: any) {
+                console.error('Error undoing move:', undoError);
+                toast.error(`Impossible d'annuler le déplacement${undoError?.message ? ` : ${undoError.message}` : ''}`);
+              }
+            },
+          },
+        }
+      );
+    } catch (error: any) {
+      console.error('Error moving folder:', error);
+      await fetchFolders();
+      if (error.message?.includes('sous-dossiers')) {
+        toast.error('Impossible de déplacer un dossier dans un de ses sous-dossiers');
+      } else if (error.message?.includes('lui-même')) {
+        toast.error('Impossible de déplacer un dossier dans lui-même');
+      } else {
+        toast.error(`Erreur lors du déplacement${error?.message ? ` : ${error.message}` : ''}`);
+      }
+    }
+  };
+
+  /**
+   * Garde-fous d'un déplacement : permissions, dossier dans lui-même,
+   * dossier dans un de ses descendants, destination inchangée.
+   * Retourne false (avec message) si le déplacement est interdit.
+   */
+  const validateMove = (folder: Folder, targetId: string | null, targetName: string): boolean => {
+    if (!canMoveFolder(profile, folder)) {
+      toast.error('Vous n\'avez pas la permission de déplacer ce dossier');
+      return false;
+    }
+    if (targetId === folder.id) {
+      toast.error('Impossible de déplacer un dossier dans lui-même');
+      return false;
+    }
+    if (targetId && getDescendantIds(folder.id).has(targetId)) {
+      toast.error('Impossible de déplacer un dossier dans un de ses sous-dossiers');
+      return false;
+    }
+    if ((folder.parent_id ?? null) === targetId) {
+      toast.info(
+        targetId
+          ? `« ${folder.name} » est déjà dans « ${targetName} »`
+          : `« ${folder.name} » est déjà à la racine`
+      );
+      return false;
+    }
+    return true;
+  };
+
+  /** Drag & drop : valide puis ouvre la modale de confirmation. */
+  const requestMove = (folder: Folder, targetId: string | null, targetName: string): boolean => {
+    if (!validateMove(folder, targetId, targetName)) return false;
+    setPendingMove({ folder, targetId, targetName });
+    return true;
+  };
+
+  /** « Déplacer vers… » : le bouton du sélecteur vaut confirmation. */
+  const confirmMoveFolderDialog = async () => {
+    if (!folderToMove) return;
+    const targetId = moveFolderTargetId === 'root' ? null : moveFolderTargetId;
+    const targetName = targetId
+      ? (folders.find(f => f.id === targetId)?.name || 'ce dossier')
+      : 'la racine';
+
+    if (!validateMove(folderToMove, targetId, targetName)) return;
+
+    setIsMoveFolderDialogOpen(false);
+    const folder = folderToMove;
+    setFolderToMove(null);
+    setMoveFolderTargetId('root');
+    await executeMove(folder, targetId, targetName);
+  };
+
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event;
     setActiveDragId(active.id as string);
@@ -443,7 +640,13 @@ export default function DocumentsPage() {
     setOverId(over ? (over.id as string) : null);
   };
 
-  const handleDragEnd = async (event: DragEndEvent) => {
+  /**
+   * Drop d'un dossier sur un autre = demande de déplacement DANS ce dossier.
+   * AUCUNE écriture ici : on valide les garde-fous puis on ouvre la
+   * confirmation (pendingMove). L'écriture n'a lieu qu'après « Confirmer ».
+   * (L'ancien « réordonnancement » entre frères, jamais persisté, est supprimé.)
+   */
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveDragId(null);
     setOverId(null);
@@ -455,82 +658,9 @@ export default function DocumentsPage() {
     const draggedFolder = folders.find(f => f.id === active.id);
     const targetFolder = folders.find(f => f.id === over.id);
 
-    if (!draggedFolder) return;
+    if (!draggedFolder || !targetFolder) return;
 
-    // Check permissions
-    if (!canMoveFolder(profile, draggedFolder)) {
-      toast.error('Vous n\'avez pas la permission de déplacer ce dossier');
-      return;
-    }
-
-    try {
-      // Determine if this is a REORDER or REPARENT operation
-      // REORDER: Both folders have the same parent (siblings) - just changing position
-      // REPARENT: Dropping onto a folder with different parent - moving INTO that folder
-
-      const sameParent = draggedFolder.parent_id === targetFolder?.parent_id;
-
-      if (targetFolder && !sameParent) {
-        // REPARENT: Move INTO target folder (different parent)
-        console.log(`🔄 Reparenting: Moving "${draggedFolder.name}" into "${targetFolder.name}"`);
-        console.log(`   Current parent: ${draggedFolder.parent_id || 'root'} → New parent: ${targetFolder.id}`);
-
-        const newParentId = targetFolder.id;
-
-        // 1. Expand parent folder FIRST
-        setExpandedFolders(prev => {
-          const newExpanded = new Set(prev);
-          newExpanded.add(newParentId);
-          console.log('Expanded folders:', Array.from(newExpanded));
-          return newExpanded;
-        });
-
-        // 2. Make API call with cycle detection
-        await FolderHelpers.move(draggedFolder.id, newParentId);
-        console.log('Folder moved successfully in database');
-
-        // 3. Refresh folders from server
-        await fetchFolders();
-        console.log('Folders refreshed from server');
-
-        // 4. Ensure parent stays expanded after refresh
-        setExpandedFolders(prev => {
-          const newExpanded = new Set(prev);
-          newExpanded.add(newParentId);
-          return newExpanded;
-        });
-
-        // 5. Show success message for REPARENTING
-        toast.success(`Dossier déplacé dans "${targetFolder.name}"`);
-
-      } else {
-        // REORDER: Just changing position among siblings (same parent)
-        console.log(`↕️ Reordering: Moving "${draggedFolder.name}" to new position`);
-        console.log(`   Parent remains: ${draggedFolder.parent_id || 'root'}`);
-
-        const oldIndex = folders.findIndex(f => f.id === active.id);
-        const newIndex = folders.findIndex(f => f.id === over.id);
-
-        if (oldIndex !== -1 && newIndex !== -1) {
-          setFolders(arrayMove(folders, oldIndex, newIndex));
-          // Show success message for REORDERING
-          toast.success('Position du dossier modifiée');
-        }
-      }
-    } catch (error: any) {
-      console.error('Error in drag operation:', error);
-
-      // Refresh to restore correct state
-      await fetchFolders();
-
-      if (error.message?.includes('sous-dossiers')) {
-        toast.error('Impossible de déplacer un dossier dans un de ses sous-dossiers');
-      } else if (error.message?.includes('lui-même')) {
-        toast.error('Impossible de déplacer un dossier dans lui-même');
-      } else {
-        toast.error('Erreur lors de l\'opération');
-      }
-    }
+    requestMove(draggedFolder, targetFolder.id, targetFolder.name);
   };
 
 
@@ -639,6 +769,14 @@ export default function DocumentsPage() {
         toast.success('Document supprimé');
         // Rafraîchissement ciblé du conteneur concerné uniquement
         refreshDocumentContainer(documentContainerId);
+        // Invalider le compteur du dossier concerné
+        if (documentContainerId) {
+          setDocCounts(prev => {
+            const next = { ...prev };
+            delete next[documentContainerId];
+            return next;
+          });
+        }
       }
       setIsDeleteDialogOpen(false);
       setItemToDelete(null);
@@ -692,6 +830,14 @@ export default function DocumentsPage() {
       if (targetFolderId !== sourceFolderId) {
         refreshDocumentContainer(targetFolderId);
       }
+
+      // Invalider les compteurs des dossiers concernés
+      setDocCounts(prev => {
+        const next = { ...prev };
+        if (sourceFolderId) delete next[sourceFolderId];
+        if (targetFolderId) delete next[targetFolderId];
+        return next;
+      });
 
       toast.success('Document déplacé avec succès');
       setIsMoveDocumentDialogOpen(false);
@@ -844,6 +990,21 @@ export default function DocumentsPage() {
     }
   };
 
+  // Comparateur de tri (affichage uniquement, aucune écriture)
+  const compareItems = (a: { name: string; createdAt: string }, b: { name: string; createdAt: string }): number => {
+    switch (sortBy) {
+      case 'name-desc':
+        return b.name.localeCompare(a.name, 'fr', { numeric: true, sensitivity: 'base' });
+      case 'date-desc':
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      case 'date-asc':
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      case 'name-asc':
+      default:
+        return a.name.localeCompare(b.name, 'fr', { numeric: true, sensitivity: 'base' });
+    }
+  };
+
   const toggleFolder = (folderId: string) => {
     const newExpanded = new Set(expandedFolders);
     if (newExpanded.has(folderId)) {
@@ -858,25 +1019,29 @@ export default function DocumentsPage() {
   };
 
   const getDocumentsInFolder = (folderId: string) => {
-    return docsByFolder[folderId] ?? [];
+    return [...(docsByFolder[folderId] ?? [])].sort(compareItems);
   };
 
   const getSubFolders = (parentId: string) => {
-    return folders.filter(folder => folder.parent_id === parentId);
+    return folders.filter(folder => folder.parent_id === parentId).sort(compareItems);
   };
 
-  const filteredFolders = folders.filter(folder => {
-    const matchesSearch = folder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      folder.folder_number?.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || folder.category === categoryFilter;
-    return matchesSearch && matchesCategory && !folder.parent_id;
-  });
+  const filteredFolders = folders
+    .filter(folder => {
+      const matchesSearch = folder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        folder.folder_number?.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCategory = categoryFilter === 'all' || folder.category === categoryFilter;
+      return matchesSearch && matchesCategory && !folder.parent_id;
+    })
+    .sort(compareItems);
 
-  const filteredDocuments = documents.filter(doc => {
-    const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = categoryFilter === 'all' || doc.category === categoryFilter;
-    return matchesSearch && matchesCategory && !doc.folder_id;
-  });
+  const filteredDocuments = documents
+    .filter(doc => {
+      const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCategory = categoryFilter === 'all' || doc.category === categoryFilter;
+      return matchesSearch && matchesCategory && !doc.folder_id;
+    })
+    .sort(compareItems);
 
   // Recursive helper to render folder hierarchy
   const renderFolderRecursive = (foldersToRender: Folder[], depth: number = 0) => {
@@ -897,6 +1062,8 @@ export default function DocumentsPage() {
             canMove={canMove}
             onToggle={() => toggleFolder(folder.id)}
             style={depth > 0 ? { paddingLeft: `${18 + depth * 26}px` } : undefined} // indentation charte : depth × 26px
+            subCount={subFolders.length}
+            docCount={getDocCount(folder.id)}
           >
             {/* Same dropdown menu for ALL levels */}
             <DropdownMenu>
@@ -968,6 +1135,19 @@ export default function DocumentsPage() {
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
+                    setFolderToMove(folder);
+                    setMoveFolderTargetId(folder.parent_id || 'root');
+                    setIsMoveFolderDialogOpen(true);
+                  }}
+                  disabled={!canMoveFolder(profile, folder)}
+                  className="whitespace-nowrap cursor-pointer"
+                >
+                  <FolderInput className="h-4 w-4 mr-2" />
+                  Déplacer vers…
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setParentFolder(folder);
                     setIsNewSubFolderDialogOpen(true);
                   }}
@@ -994,15 +1174,23 @@ export default function DocumentsPage() {
           {/* Children: Subfolders and Documents */}
           {isExpanded && (
             <div className="border-t border-gray-100">
-              {/* Loading state while this folder's documents are being fetched */}
+              {/* Loading state while this folder's documents are being fetched (skeleton rows) */}
               {loadingFolderIds.has(folder.id) && !docsByFolder[folder.id] && (
-                <div
-                  className="flex items-center gap-2 px-[18px] py-3 text-sm text-pmn-faint"
-                  style={{ paddingLeft: `${18 + (depth + 1) * 26}px` }}
-                >
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Chargement des documents...
-                </div>
+                <>
+                  {Array.from({ length: 2 }).map((_, i) => (
+                    <div
+                      key={`skeleton-${folder.id}-${i}`}
+                      className="flex items-center gap-3 px-[18px] py-[9px]"
+                      style={{ paddingLeft: `${18 + (depth + 1) * 26}px` }}
+                    >
+                      <Skeleton className="h-10 w-10 rounded-[9px]" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-[50%] max-w-[360px] rounded" />
+                        <Skeleton className="h-3 w-[20%] max-w-[140px] rounded" />
+                      </div>
+                    </div>
+                  ))}
+                </>
               )}
 
               {/* Error state with retry, instead of a misleading empty folder */}
@@ -1145,15 +1333,32 @@ export default function DocumentsPage() {
   };
 
   if (loading) {
+    // Squelette de chargement : même structure que la page (header + toolbar + arborescence)
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh]">
-        <div className="relative">
-          <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-[#15654B] to-[#0E3B2E] shadow-cta">
-            <span className="text-2xl font-bold text-white">PMN</span>
-          </div>
-          <Loader2 className="absolute -bottom-2 left-1/2 h-8 w-8 -translate-x-1/2 animate-spin text-pmn-green" />
+      <div className="mx-auto max-w-[1320px] animate-fade-up space-y-[18px] px-6 pb-12 pt-[34px] md:px-10">
+        <div>
+          <Skeleton className="h-9 w-[420px] max-w-full rounded-lg" />
+          <Skeleton className="mt-3 h-4 w-[320px] max-w-full rounded" />
         </div>
-        <p className="mt-6 font-medium text-pmn-subtle">Chargement des documents...</p>
+        <div className="surface flex items-center gap-3 p-3.5">
+          <Skeleton className="h-11 flex-1 rounded-[11px]" />
+          <Skeleton className="hidden h-11 w-[190px] rounded-[11px] md:block" />
+          <Skeleton className="hidden h-11 w-[170px] rounded-[11px] md:block" />
+          <Skeleton className="h-11 w-[150px] rounded-[11px]" />
+        </div>
+        <div className="surface overflow-hidden p-0">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 border-b border-[rgba(20,33,28,.055)] px-[18px] py-[11px]">
+              <Skeleton className="h-4 w-4 rounded" />
+              <Skeleton className="h-9 w-9 rounded-[9px]" />
+              <div className="flex-1 space-y-2">
+                <Skeleton className="h-4 w-[45%] max-w-[340px] rounded" />
+                <Skeleton className="h-3 w-[25%] max-w-[180px] rounded" />
+              </div>
+              <Skeleton className="h-6 w-[72px] rounded-[20px]" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -1192,6 +1397,20 @@ export default function DocumentsPage() {
             {CATEGORIES.map(cat => (
               <SelectItem key={cat} value={cat}>{cat}</SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+        <Select value={sortBy} onValueChange={handleSortChange}>
+          <SelectTrigger className="h-11 w-full rounded-[11px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] text-sm font-medium text-pmn-text2 md:w-[170px]">
+            <span className="flex items-center gap-2">
+              <ArrowUpDown className="h-4 w-4 text-pmn-faint" />
+              <SelectValue placeholder="Trier" />
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name-asc">Nom (A → Z)</SelectItem>
+            <SelectItem value="name-desc">Nom (Z → A)</SelectItem>
+            <SelectItem value="date-desc">Plus récent</SelectItem>
+            <SelectItem value="date-asc">Plus ancien</SelectItem>
           </SelectContent>
         </Select>
         <div className="flex w-full gap-2 md:w-auto">
@@ -1340,7 +1559,13 @@ export default function DocumentsPage() {
                       <p className="flex items-center gap-1.5 text-xs text-pmn-faint">
                         {format(new Date(folder.createdAt), 'dd/MM/yyyy', { locale: fr })}
                         {' · '}
-                        {getSubFolders(folder.id).length + (docsByFolder[folder.id]?.length ?? 0)} éléments
+                        {(() => {
+                          const subCount = getSubFolders(folder.id).length;
+                          const docCount = getDocCount(folder.id);
+                          return docCount !== undefined
+                            ? `${subCount + docCount} éléments`
+                            : `${subCount} sous-dossier${subCount > 1 ? 's' : ''}`;
+                        })()}
                       </p>
                       <p className="text-xs text-pmn-faint">{folder.category || 'Non classé'}</p>
                     </div>
@@ -1786,18 +2011,159 @@ export default function DocumentsPage() {
             <DialogDescription className="break-words">
               Êtes-vous sûr de vouloir supprimer {itemToDelete?.type === 'folder' ? 'le dossier' : 'le document'}{' '}
               <strong className="break-all">"{itemToDelete?.name}"</strong> ?
-              {itemToDelete?.type === 'folder' && " Tout son contenu sera également supprimé."}
-              <br />
-              <br />
-              Cette action est irréversible.
             </DialogDescription>
           </DialogHeader>
+          {itemToDelete?.type === 'folder' && (() => {
+            const subCount = folders.filter(f => f.parent_id === itemToDelete.id).length;
+            const docCount = getDocCount(itemToDelete.id);
+            const isEmpty = subCount === 0 && docCount === 0;
+            if (isEmpty) {
+              return (
+                <p className="text-sm text-pmn-faint">Ce dossier est vide.</p>
+              );
+            }
+            return (
+              <div className="rounded-[11px] border border-pmn-gold/30 bg-pmn-gold/[.08] p-3 text-sm text-pmn-gold-dark">
+                <p className="font-semibold">
+                  Ce dossier contient {docCount !== undefined ? `${docCount} document(s)` : 'des documents'} et {subCount} sous-dossier(s).
+                </p>
+                <p className="mt-1">
+                  Son contenu ne sera pas supprimé automatiquement : déplacez ou supprimez
+                  d&apos;abord son contenu si nécessaire.
+                </p>
+              </div>
+            );
+          })()}
+          <p className="text-sm text-pmn-faint">Cette action est irréversible.</p>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
               Annuler
             </Button>
             <Button onClick={confirmDelete} className="bg-red-600 hover:bg-red-700 text-white">
               Supprimer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== Confirmation de déplacement (drag & drop) ===== */}
+      <Dialog
+        open={pendingMove !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingMove(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center text-pmn-green">
+              <FolderInput className="h-5 w-5 mr-2" />
+              Déplacer le dossier ?
+            </DialogTitle>
+            <DialogDescription className="break-words pt-2">
+              Déplacer <strong className="break-all text-pmn-ink">« {pendingMove?.folder.name} »</strong>{' '}
+              {pendingMove?.targetId ? (
+                <>dans <strong className="break-all text-pmn-ink">« {pendingMove?.targetName} »</strong> ?</>
+              ) : (
+                <>à la <strong className="text-pmn-ink">racine</strong> ?</>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-pmn-faint">
+            Vous pourrez annuler ce déplacement pendant 10 secondes après confirmation.
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingMove(null)}>
+              Annuler
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!pendingMove) return;
+                const { folder, targetId, targetName } = pendingMove;
+                setPendingMove(null);
+                await executeMove(folder, targetId, targetName);
+              }}
+              className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110"
+            >
+              <FolderInput className="h-4 w-4 mr-2" />
+              Confirmer le déplacement
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ===== « Déplacer vers… » : sélecteur de destination ===== */}
+      <Dialog
+        open={isMoveFolderDialogOpen}
+        onOpenChange={(open) => {
+          setIsMoveFolderDialogOpen(open);
+          if (!open) {
+            setFolderToMove(null);
+            setMoveFolderTargetId('root');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center text-pmn-green">
+              <FolderInput className="h-5 w-5 mr-2" />
+              Déplacer le dossier
+            </DialogTitle>
+            <DialogDescription className="break-words">
+              Choisissez la destination de <strong className="break-all">« {folderToMove?.name} »</strong>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="move-folder-target">Dossier de destination</Label>
+              <Select value={moveFolderTargetId} onValueChange={setMoveFolderTargetId}>
+                <SelectTrigger id="move-folder-target" className="w-full">
+                  <SelectValue placeholder="Sélectionner une destination" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[300px]">
+                  <SelectItem value="root">
+                    <span className="italic text-pmn-subtle">Racine (aucun dossier parent)</span>
+                  </SelectItem>
+                  {(() => {
+                    if (!folderToMove) return null;
+                    // Exclure le dossier lui-même et tous ses descendants
+                    const excluded = getDescendantIds(folderToMove.id);
+                    excluded.add(folderToMove.id);
+                    return folderOptions
+                      .filter(option => !excluded.has(option.id))
+                      .map(option => (
+                        <SelectItem key={option.id} value={option.id}>
+                          {option.path}
+                        </SelectItem>
+                      ));
+                  })()}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-pmn-faint">
+                Position actuelle :{' '}
+                {folderToMove?.parent_id
+                  ? getFolderPath(folderToMove.parent_id) || 'dossier parent'
+                  : 'Racine'}
+                {' '}· Le dossier lui-même et ses sous-dossiers sont exclus des destinations.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsMoveFolderDialogOpen(false);
+                setFolderToMove(null);
+                setMoveFolderTargetId('root');
+              }}
+            >
+              Annuler
+            </Button>
+            <Button
+              onClick={confirmMoveFolderDialog}
+              className="rounded-[11px] bg-gradient-to-br from-[#15654B] to-[#0E3B2E] font-semibold text-white shadow-cta transition-[filter] hover:brightness-110"
+            >
+              <FolderInput className="h-4 w-4 mr-2" />
+              Confirmer le déplacement
             </Button>
           </DialogFooter>
         </DialogContent>
