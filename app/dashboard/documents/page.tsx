@@ -2407,16 +2407,58 @@ export default function DocumentsPage() {
                             <MoreVertical className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setSelectedFolder(folder); setIsRenameDialogOpen(true); }}>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); setSelectedFolder(folder); setRenameValue(folder.name); setIsRenameDialogOpen(true); }}
+                            disabled={!canRename(profile, folder)}
+                            className="cursor-pointer"
+                          >
                             <Edit className="h-4 w-4 mr-2" /> Renommer
                           </DropdownMenuItem>
                           {['admin', 'super_admin'].includes(profile?.role || '') && (
-                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); toast.info("Modification du numéro à venir"); }}>
+                            <DropdownMenuItem
+                              onClick={(e) => { e.stopPropagation(); setSelectedFolder(folder); setNewFolderNumber(folder.folder_number || ''); setIsModifyNumberDialogOpen(true); }}
+                              className="cursor-pointer"
+                            >
                               <Hash className="h-4 w-4 mr-2" /> Modifier numéro
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder); }} className="text-red-600">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownloadFolder(folder); }} className="cursor-pointer">
+                            <Download className="h-4 w-4 mr-2" /> Télécharger
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openProperties('folder', folder); }} className="cursor-pointer">
+                            <Info className="h-4 w-4 mr-2" /> Propriétés / Détails
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openProperties('folder', folder); }} className="cursor-pointer">
+                            <Tags className="h-4 w-4 mr-2" /> Classer
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); requestStatusToggle('folder', folder); }}
+                            disabled={!canRename(profile, folder)}
+                            className="cursor-pointer"
+                          >
+                            {folder.status === 'Archive'
+                              ? (<><ArchiveRestore className="h-4 w-4 mr-2" />Désarchiver</>)
+                              : (<><ArchiveIcon className="h-4 w-4 mr-2" />Archiver</>)}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleShareFolder(folder); }} className="cursor-pointer">
+                            <Share2 className="h-4 w-4 mr-2" /> Partager
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); setFolderToMove(folder); setMoveFolderTargetId(folder.parent_id || 'root'); setIsMoveFolderDialogOpen(true); }}
+                            disabled={!canMoveFolder(profile, folder)}
+                            className="cursor-pointer"
+                          >
+                            <FolderInput className="h-4 w-4 mr-2" /> Déplacer vers…
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setParentFolder(folder); setIsNewSubFolderDialogOpen(true); }} className="cursor-pointer">
+                            <FolderPlus className="h-4 w-4 mr-2" /> Nouveau sous-dossier
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder); }}
+                            disabled={!canDelete(profile, folder)}
+                            className="text-red-600 cursor-pointer"
+                          >
                             <Trash2 className="h-4 w-4 mr-2" /> Supprimer
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -2448,18 +2490,73 @@ export default function DocumentsPage() {
                       </p>
                     </div>
 
-                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {/* Actions rapides au survol : Prévisualiser + Télécharger */}
+                    <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 bg-white/80 backdrop-blur-sm hover:bg-white"
+                        title="Prévisualiser"
+                        onClick={(e) => { e.stopPropagation(); setSelectedDocument(doc); setIsPreviewDialogOpen(true); }}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 bg-white/80 backdrop-blur-sm hover:bg-white"
+                        title="Télécharger"
+                        onClick={(e) => { e.stopPropagation(); handleDownload(doc); }}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 bg-white/80 backdrop-blur-sm hover:bg-white" onClick={(e) => e.stopPropagation()}>
                             <MoreVertical className="h-4 w-4" />
                           </Button>
                         </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setSelectedDocument(doc); setIsRenameDialogOpen(true); }}>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setSelectedDocument(doc); setIsPreviewDialogOpen(true); }} className="cursor-pointer">
+                            <Eye className="h-4 w-4 mr-2" /> Prévisualiser
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDownload(doc); }} className="cursor-pointer">
+                            <Download className="h-4 w-4 mr-2" /> Télécharger
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setSelectedDocument(doc); setIsShareDialogOpen(true); }} className="cursor-pointer">
+                            <Share2 className="h-4 w-4 mr-2" /> Partager
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); setSelectedDocument(doc); setRenameValue(doc.name); setIsRenameDialogOpen(true); }}
+                            disabled={!canRename(profile, doc)}
+                            className="cursor-pointer"
+                          >
                             <Edit className="h-4 w-4 mr-2" /> Renommer
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc); }} className="text-red-600">
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); setSelectedDocument(doc); setMoveTargetFolderId(doc.folder_id || 'root'); setIsMoveDocumentDialogOpen(true); }}
+                            disabled={!canRename(profile, doc)}
+                            className="cursor-pointer"
+                          >
+                            <Folder className="h-4 w-4 mr-2" /> Déplacer vers…
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openProperties('document', doc); }} className="cursor-pointer">
+                            <Info className="h-4 w-4 mr-2" /> Propriétés / Classer
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); requestStatusToggle('document', doc); }}
+                            disabled={!canRename(profile, doc)}
+                            className="cursor-pointer"
+                          >
+                            {doc.status === 'Archive'
+                              ? (<><ArchiveRestore className="h-4 w-4 mr-2" />Désarchiver</>)
+                              : (<><ArchiveIcon className="h-4 w-4 mr-2" />Archiver</>)}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => { e.stopPropagation(); handleDeleteDocument(doc); }}
+                            disabled={!canDelete(profile, doc)}
+                            className="text-red-600 cursor-pointer"
+                          >
                             <Trash2 className="h-4 w-4 mr-2" /> Supprimer
                           </DropdownMenuItem>
                         </DropdownMenuContent>
