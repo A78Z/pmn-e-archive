@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Upload, FileText, Folder, X, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
+import { Upload, FileText, Folder, X, AlertCircle, CheckCircle, RefreshCw, FolderInput, ChevronDown, Sparkles } from 'lucide-react';
 import { useAuth } from '@/lib/parse-auth';
 import { FolderHelpers, DocumentHelpers, FileHelpers } from '@/lib/parse-helpers';
 import { Parse } from '@/lib/parse';
@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { useRouter } from 'next/navigation';
 import { sanitizeFilenames, needsSanitization, validateFilename } from '@/lib/filename-utils';
 import { ExtBadge } from '@/components/pmn-icons';
+import { DestinationPicker } from '@/components/destination-picker';
 
 interface FolderOption {
   id: string;
@@ -42,6 +43,11 @@ export default function UploadPage() {
   const [fileStates, setFileStates] = useState<FileUploadState[]>([]);
   const [category, setCategory] = useState<string | undefined>(undefined);
   const [destinationFolder, setDestinationFolder] = useState<string | undefined>(undefined);
+  const [destinationPath, setDestinationPath] = useState<string>('');
+  const [isPickerOpen, setIsPickerOpen] = useState(false);
+  // Suggestion IA (optionnelle, dégradation propre)
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState<Array<{ id: string; path: string }>>([]);
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -49,11 +55,54 @@ export default function UploadPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [showRenamedWarning, setShowRenamedWarning] = useState(false);
 
+  // Le sélecteur de destination charge les dossiers à la demande
+  // (recherche + arbre paresseux) : plus de chargement massif ici.
+
+  // Health-check IA (une fois) : la suggestion n'est proposée que si l'IA
+  // répond OK. Sinon, section masquée — aucune erreur, aucun blocage.
   useEffect(() => {
-    if (profile) {
-      fetchFolders();
-    }
-  }, [profile]);
+    let cancelled = false;
+    fetch('/api/ai-search')
+      .then(r => r.json())
+      .then(d => { if (!cancelled) setAiAvailable(Boolean(d?.keyPresent && d?.testCall === 'ok')); })
+      .catch(() => { if (!cancelled) setAiAvailable(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Suggestions IA de destination à partir des noms de fichiers + catégorie
+  const fileNamesKey = fileStates.map(f => f.sanitizedName).join('|');
+  useEffect(() => {
+    if (!aiAvailable) { setAiSuggestions([]); return; }
+    const names = fileStates.map(f => f.sanitizedName).slice(0, 10);
+    if (names.length === 0) { setAiSuggestions([]); return; }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const query = [category, ...names].filter(Boolean).join(' ');
+        const res = await fetch('/api/ai-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query }),
+        });
+        const data = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (res.ok && Array.isArray(data?.results)) {
+          const dossiers = data.results
+            .filter((r: any) => r.type === 'dossier')
+            .slice(0, 3)
+            .map((r: any) => ({ id: r.objectId, path: r.path }));
+          setAiSuggestions(dossiers);
+        } else {
+          setAiSuggestions([]);
+        }
+      } catch {
+        if (!cancelled) setAiSuggestions([]);
+      }
+    }, 600);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiAvailable, fileNamesKey, category]);
 
   // Helper to safely get parent ID from various formats
   const getParentId = (folder: any): string | null => {
@@ -618,19 +667,42 @@ export default function UploadPage() {
             <Label htmlFor="destinationFolder" className="text-base font-semibold">
               Dossier de destination
             </Label>
-            <Select value={destinationFolder} onValueChange={(value) => setDestinationFolder(value === 'root' ? undefined : value)}>
-              <SelectTrigger className="h-[46px] rounded-[11px] border-[rgba(20,33,28,.08)] bg-[#F6F5F0] text-sm">
-                <SelectValue placeholder="Racine (aucun dossier)" />
-              </SelectTrigger>
-              <SelectContent className="max-h-[40vh] overflow-y-auto">
-                <SelectItem value="root">Racine (aucun dossier)</SelectItem>
-                {folders.map(folder => (
-                  <SelectItem key={folder.id} value={folder.id}>
-                    {folder.path}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <button
+              type="button"
+              onClick={() => setIsPickerOpen(true)}
+              className="flex h-[46px] w-full items-center justify-between gap-2 rounded-[11px] border border-[rgba(20,33,28,.08)] bg-[#F6F5F0] px-3.5 text-left text-sm transition-colors hover:border-pmn-green/30"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <FolderInput className="h-4 w-4 flex-none text-pmn-faint" />
+                <span className={`truncate ${destinationFolder ? 'font-medium text-pmn-ink' : 'text-pmn-subtle'}`}>
+                  {destinationFolder ? destinationPath : 'Racine (aucun dossier)'}
+                </span>
+              </span>
+              <ChevronDown className="h-4 w-4 flex-none text-pmn-faint" />
+            </button>
+
+            {/* Suggestions IA (Partie 2) — masquées si l'IA est indisponible */}
+            {aiAvailable && aiSuggestions.length > 0 && (
+              <div className="mt-2 rounded-[11px] border border-pmn-gold/30 bg-pmn-gold/[.06] p-2.5">
+                <p className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-pmn-gold-dark">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Destinations suggérées
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {aiSuggestions.map(s => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => { setDestinationFolder(s.id); setDestinationPath(s.path); }}
+                      className="max-w-full truncate rounded-[8px] border border-pmn-green/25 bg-white px-2.5 py-1 text-[12px] font-medium text-pmn-green transition-colors hover:bg-pmn-green/[.06]"
+                      title={s.path}
+                    >
+                      {s.path}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -685,6 +757,18 @@ export default function UploadPage() {
           </Button>
         </div>
       </div>
+
+      {/* Sélecteur de destination intelligent */}
+      <DestinationPicker
+        open={isPickerOpen}
+        onOpenChange={setIsPickerOpen}
+        category={category}
+        createdBy={profile?.id}
+        onSelect={(id, path) => {
+          setDestinationFolder(id);
+          setDestinationPath(path);
+        }}
+      />
     </div>
   );
 }

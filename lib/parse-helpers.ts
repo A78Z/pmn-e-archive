@@ -395,6 +395,49 @@ export const FolderHelpers = {
     },
 
     /**
+     * Dossiers RACINE (sans parent) — point d'entrée du sélecteur de
+     * destination (chargement paresseux : on ne charge pas tout l'arbre).
+     */
+    async getRootFolders() {
+        const missing = new Parse.Query(ParseClasses.FOLDER);
+        missing.doesNotExist('parent_id');
+        const nullValue = new Parse.Query(ParseClasses.FOLDER);
+        nullValue.equalTo('parent_id', null);
+        const query = (Parse.Query.or as any)(missing, nullValue);
+        query.ascending('name');
+        query.limit(1000);
+        const results = await query.find();
+        return results.map(parseObjectToJSON);
+    },
+
+    /**
+     * Recherche de dossiers par nom (contains, casse-insensible), LIMITÉE.
+     * Ne charge jamais tous les dossiers : requête ciblée paginable.
+     */
+    async searchByName(term: string, limit = 30, skip = 0) {
+        const query = new Parse.Query(ParseClasses.FOLDER);
+        query.matches('name', new RegExp(escapeRegex(term), 'i'));
+        query.ascending('name');
+        query.skip(skip);
+        query.limit(limit);
+        const results = await query.find();
+        return results.map(parseObjectToJSON);
+    },
+
+    /**
+     * Récupère un lot de dossiers par leurs objectId (pour résoudre les
+     * chemins d'ancêtres sans charger l'intégralité de l'arbre).
+     */
+    async getByIds(ids: string[]) {
+        if (ids.length === 0) return [];
+        const query = new Parse.Query(ParseClasses.FOLDER);
+        query.containedIn('objectId', ids);
+        query.limit(ids.length);
+        const results = await query.find();
+        return results.map(parseObjectToJSON);
+    },
+
+    /**
      * Recherche approfondie côté serveur sur les dossiers (tokenisée).
      * Un dossier correspond s'il contient AU MOINS UN token dans nom / cote /
      * catégorie / rubrique / mots_cles. Classement par pertinence.
