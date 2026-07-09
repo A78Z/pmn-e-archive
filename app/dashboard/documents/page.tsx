@@ -192,6 +192,11 @@ export default function DocumentsPage() {
   const [docCounts, setDocCounts] = useState<Record<string, number>>({});
   const countsInFlight = useRef<Set<string>>(new Set());
 
+  // ===== Navigation « drill-down » en vues grille / très grandes icônes =====
+  // Pile du chemin courant (fil d'Ariane). Vide = racine.
+  // Indépendant de la vue liste (qui utilise expandedFolders + le chevron).
+  const [gridPath, setGridPath] = useState<Folder[]>([]);
+
   // ===== Panneau Propriétés / Classer =====
   const [propertiesItem, setPropertiesItem] = useState<PropertiesItem | null>(null);
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
@@ -543,6 +548,19 @@ export default function DocumentsPage() {
   const handleViewModeChange = (mode: 'list' | 'large' | 'very-large') => {
     setViewMode(mode);
     localStorage.setItem('pmn_folder_view_mode', mode);
+  };
+
+  // ===== Handlers de navigation drill-down (vues grille) =====
+  // Entrer dans un dossier : empiler dans le fil d'Ariane + charger son
+  // contenu à la demande (getByFolder — lazy-loading respecté).
+  const enterFolderGrid = (folder: Folder) => {
+    setGridPath(prev => [...prev, folder]);
+    fetchFolderDocuments(folder.id);
+  };
+
+  // Remonter à un niveau du fil d'Ariane (index -1 = racine).
+  const gridNavigateTo = (index: number) => {
+    setGridPath(prev => (index < 0 ? [] : prev.slice(0, index + 1)));
   };
 
   // NOTE: l'ancien polling (10 s) rechargeait TOUS les documents à chaque cycle
@@ -1379,6 +1397,25 @@ export default function DocumentsPage() {
       return matchesSearch && matchesCategory && matchesExtraFilters(doc) && !doc.folder_id;
     })
     .sort(compareItems);
+
+  // ===== Contenu du dossier courant en vue GRILLE (drill-down) =====
+  // gridCurrentId = null → racine (mêmes éléments qu'en liste au niveau 0).
+  const gridCurrentId = gridPath.length ? gridPath[gridPath.length - 1].id : null;
+
+  const gridFolders = folders
+    .filter(f => (f.parent_id ?? null) === gridCurrentId)
+    .filter(f => categoryFilter === 'all' || f.category === categoryFilter)
+    .filter(matchesExtraFilters)
+    .sort(compareItems);
+
+  // Documents du dossier courant : racine → state `documents` ;
+  // sous-dossier → cache `docsByFolder` (chargé au drill-in).
+  const gridDocuments = (gridCurrentId ? (docsByFolder[gridCurrentId] ?? []) : documents)
+    .filter((d: Document) => categoryFilter === 'all' || d.category === categoryFilter)
+    .filter(matchesExtraFilters)
+    .sort(compareItems);
+
+  const gridLoading = gridCurrentId != null && loadingFolderIds.has(gridCurrentId) && docsByFolder[gridCurrentId] === undefined;
 
   // Recursive helper to render folder hierarchy
   const renderFolderRecursive = (foldersToRender: Folder[], depth: number = 0) => {
@@ -2278,18 +2315,59 @@ export default function DocumentsPage() {
               </DragOverlay>
             </DndContext>
           ) : (
-            <div className={`grid gap-4 p-[18px] ${viewMode === 'very-large' ? 'grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
+            <div>
+              {/* Fil d'Ariane de navigation (drill-down grille) */}
+              <div className="flex flex-wrap items-center gap-1 border-b border-border px-[18px] py-3 text-sm">
+                <button
+                  type="button"
+                  onClick={() => gridNavigateTo(-1)}
+                  className={`rounded-md px-2 py-1 font-medium transition-colors ${gridPath.length === 0 ? 'text-pmn-ink' : 'text-pmn-green hover:bg-pmn-green/[.06]'}`}
+                >
+                  Racine
+                </button>
+                {gridPath.map((seg, i) => {
+                  const live = folders.find(f => f.id === seg.id);
+                  const label = live?.name || seg.name;
+                  const isLast = i === gridPath.length - 1;
+                  return (
+                    <span key={seg.id} className="flex items-center gap-1">
+                      <ChevronRight className="h-3.5 w-3.5 text-pmn-faint" strokeWidth={2} />
+                      <button
+                        type="button"
+                        onClick={() => gridNavigateTo(i)}
+                        className={`max-w-[220px] truncate rounded-md px-2 py-1 font-medium transition-colors ${isLast ? 'text-pmn-ink' : 'text-pmn-green hover:bg-pmn-green/[.06]'}`}
+                        title={label}
+                      >
+                        {label}
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+
+              {/* Chargement du contenu du dossier courant */}
+              {gridLoading ? (
+                <div className={`grid gap-4 p-[18px] ${viewMode === 'very-large' ? 'grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="rounded-[16px] border border-border bg-white p-[18px] shadow-card">
+                      <Skeleton className="h-12 w-12 rounded-[9px]" />
+                      <Skeleton className="mt-4 h-4 w-[70%] rounded" />
+                      <Skeleton className="mt-2 h-3 w-[40%] rounded" />
+                    </div>
+                  ))}
+                </div>
+              ) : gridFolders.length === 0 && gridDocuments.length === 0 ? (
+                <div className="px-[18px] py-16 text-center text-sm italic text-pmn-faint">
+                  Dossier vide
+                </div>
+              ) : (
+                <div className={`grid gap-4 p-[18px] ${viewMode === 'very-large' ? 'grid-cols-2 lg:grid-cols-3' : 'grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
               {/* Folders Grid */}
-              {filteredFolders.map((folder) => (
+              {gridFolders.map((folder) => (
                 <Card
                   key={folder.id}
                   className="group relative cursor-pointer rounded-[16px] border border-border bg-white p-0 shadow-card transition-all duration-200 hover:border-pmn-green/[.35] hover:shadow-card-hover"
-                  onClick={() => {
-                    handleViewModeChange('list');
-                    if (!expandedFolders.has(folder.id)) {
-                      toggleFolder(folder.id);
-                    }
-                  }}
+                  onClick={() => enterFolderGrid(folder)}
                 >
                   <CardContent className="p-[18px]">
                     <div className="flex items-center justify-between">
@@ -2349,7 +2427,7 @@ export default function DocumentsPage() {
               ))}
 
               {/* Documents Grid */}
-              {filteredDocuments.map((doc) => (
+              {gridDocuments.map((doc) => (
                 <Card
                   key={doc.id}
                   className="group relative cursor-pointer rounded-[16px] border border-border bg-white p-0 shadow-card transition-all duration-200 hover:border-pmn-green/[.35] hover:shadow-card-hover"
@@ -2390,6 +2468,8 @@ export default function DocumentsPage() {
                   </CardContent>
                 </Card>
               ))}
+                </div>
+              )}
             </div>
           )}
         </Card>
