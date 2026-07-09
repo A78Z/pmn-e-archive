@@ -32,7 +32,9 @@ import {
   Info,
   Tags,
   Archive as ArchiveIcon,
-  ArchiveRestore
+  ArchiveRestore,
+  Sparkles,
+  Send
 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { PropertiesPanel, PropertiesItem } from '@/components/properties-panel';
@@ -210,6 +212,15 @@ export default function DocumentsPage() {
   const [searchHasMore, setSearchHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const deepSearchActive = searchTerm.trim().length >= 2;
+
+  // ===== Recherche intelligente (IA, langage naturel) =====
+  // Mode complémentaire à la recherche classique. La clé API vit UNIQUEMENT
+  // côté serveur (/api/ai-search) : le client n'envoie que la requête.
+  const [aiMode, setAiMode] = useState(false);
+  const [aiQuery, setAiQuery] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResults, setAiResults] = useState<any[] | null>(null);
+  const [aiSynthese, setAiSynthese] = useState<string | null>(null);
   const [isModifyNumberDialogOpen, setIsModifyNumberDialogOpen] = useState(false);
   const [newFolderNumber, setNewFolderNumber] = useState('');
 
@@ -411,6 +422,75 @@ export default function DocumentsPage() {
       return next;
     });
     fetchFolderDocuments(folderId);
+  };
+
+  // ===== Recherche intelligente : envoi au serveur =====
+  const runAiSearch = async () => {
+    const query = aiQuery.trim();
+    if (query.length < 3) {
+      toast.error('Décrivez votre recherche en quelques mots (3 caractères minimum)');
+      return;
+    }
+    setAiLoading(true);
+    setAiResults(null);
+    setAiSynthese(null);
+    try {
+      const res = await fetch('/api/ai-search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        if (data?.fallback) {
+          // Repli : recherche approfondie classique (Étape A)
+          toast.info(`${data.error || 'Recherche IA indisponible'} — recherche classique utilisée.`);
+          setAiMode(false);
+          setAiResults(null);
+          setSearchTerm(query);
+          return;
+        }
+        toast.error(data?.error || 'Erreur lors de la recherche IA');
+        return;
+      }
+
+      setAiResults(data.results || []);
+      setAiSynthese(data.reponse || null);
+    } catch (error: any) {
+      console.error('AI search error:', error);
+      // Panne réseau/API : repli sur la recherche classique
+      toast.info('Recherche IA indisponible — recherche classique utilisée.');
+      setAiMode(false);
+      setSearchTerm(query);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // Clic sur un résultat IA : quitter le mode IA et révéler l'élément
+  const handleAiResultClick = (result: any) => {
+    setAiMode(false);
+    setAiResults(null);
+    setAiSynthese(null);
+    setAiQuery('');
+    // Dossier → révéler le dossier lui-même ; document → son dossier parent
+    revealInTree(result.type === 'dossier' ? result.objectId : result.parentId);
+  };
+
+  // Basculer le mode IA (reset propre dans les deux sens)
+  const toggleAiMode = () => {
+    setAiMode(prev => {
+      const next = !prev;
+      if (next) {
+        setSearchTerm(''); // désactiver la recherche classique
+      } else {
+        setAiResults(null);
+        setAiSynthese(null);
+        setAiLoading(false);
+      }
+      return next;
+    });
   };
 
   // ===== « Tout développer » : chargement PROGRESSIF du contenu =====
@@ -1680,14 +1760,59 @@ export default function DocumentsPage() {
       {/* Search and Actions */}
       <div className="surface space-y-3 p-3.5">
       <div className="flex flex-col items-center gap-3 md:flex-row">
-        <div className="relative w-full min-w-0 flex-1 md:min-w-[240px]">
-          <Search className="absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-pmn-faint" strokeWidth={2} />
-          <Input
-            placeholder="Rechercher un document..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="h-11 rounded-[11px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] pl-10 text-sm focus:border-pmn-green focus:ring-pmn-green"
-          />
+        <div className="relative flex w-full min-w-0 flex-1 items-center gap-2 md:min-w-[240px]">
+          {aiMode ? (
+            <>
+              {/* Mode IA : saisie en langage naturel */}
+              <div className="relative min-w-0 flex-1">
+                <Sparkles className="absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-pmn-gold-dark" strokeWidth={2} />
+                <Input
+                  placeholder="Ex. : les appels d'offres F-PMN de 2024"
+                  value={aiQuery}
+                  onChange={(e) => setAiQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !aiLoading) runAiSearch();
+                  }}
+                  className="h-11 rounded-[11px] border-pmn-gold/40 bg-pmn-gold/[.06] pl-10 pr-12 text-sm focus:border-pmn-gold focus:ring-pmn-gold"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={runAiSearch}
+                  disabled={aiLoading}
+                  title="Lancer la recherche IA"
+                  className="absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[8px] bg-pmn-gold text-[#3A2A00] transition-colors hover:bg-pmn-gold-deep disabled:opacity-50"
+                >
+                  {aiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="relative min-w-0 flex-1">
+              <Search className="absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-pmn-faint" strokeWidth={2} />
+              <Input
+                placeholder="Rechercher un document..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="h-11 rounded-[11px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] pl-10 text-sm focus:border-pmn-green focus:ring-pmn-green"
+              />
+            </div>
+          )}
+          {/* Bascule Recherche IA */}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={toggleAiMode}
+            title={aiMode ? 'Revenir à la recherche classique' : 'Recherche intelligente (langage naturel)'}
+            className={`h-11 flex-none gap-1.5 rounded-[11px] text-[13px] font-semibold transition-colors ${
+              aiMode
+                ? 'border-pmn-gold bg-pmn-gold/[.16] text-pmn-gold-dark hover:bg-pmn-gold/[.24] hover:text-pmn-gold-dark'
+                : 'border-pmn-gold/40 bg-white text-pmn-gold-dark hover:bg-pmn-gold/[.08] hover:text-pmn-gold-dark'
+            }`}
+          >
+            <Sparkles className="h-4 w-4" />
+            <span className="hidden lg:inline">Recherche IA</span>
+          </Button>
         </div>
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
           <SelectTrigger className="h-11 w-full rounded-[11px] border-[rgba(20,33,28,.07)] bg-[#F6F5F0] text-sm font-medium text-pmn-text2 md:w-[190px]">
@@ -1832,8 +1957,121 @@ export default function DocumentsPage() {
       </div>
       </div>
 
-      {/* ===== Résultats de recherche approfondie (liste plate, chemins complets) ===== */}
-      {deepSearchActive ? (
+      {/* ===== Résultats de la recherche intelligente (IA) ===== */}
+      {aiMode && (aiLoading || aiResults !== null) ? (
+        <div className="surface overflow-hidden p-0">
+          <div className="flex items-center justify-between border-b border-border px-[18px] py-3.5">
+            <p className="flex items-center gap-2 text-sm font-semibold text-pmn-ink">
+              <Sparkles className="h-4 w-4 text-pmn-gold-dark" />
+              {aiLoading
+                ? "L'assistant analyse vos archives…"
+                : `${aiResults?.length ?? 0} résultat(s) — recherche intelligente`}
+            </p>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-[13px] text-pmn-subtle hover:text-pmn-ink"
+              onClick={() => {
+                setAiResults(null);
+                setAiSynthese(null);
+              }}
+            >
+              Effacer
+            </Button>
+          </div>
+
+          {aiLoading ? (
+            <div>
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-3 border-b border-[rgba(20,33,28,.055)] px-[18px] py-[11px]">
+                  <Skeleton className="h-10 w-10 rounded-[9px]" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-4 w-[45%] rounded" />
+                    <Skeleton className="h-3 w-[60%] rounded" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+              {aiSynthese && (
+                <div className="border-b border-border bg-pmn-gold/[.06] px-[18px] py-3 text-sm text-pmn-text2">
+                  <Sparkles className="mr-1.5 inline h-3.5 w-3.5 text-pmn-gold-dark" />
+                  {aiSynthese}
+                </div>
+              )}
+              {(aiResults?.length ?? 0) === 0 ? (
+                <div className="px-[18px] py-10 text-center text-sm text-pmn-faint">
+                  <p>Aucun résultat pour cette recherche.</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-3 h-9 rounded-[9px] border-pmn-green/25 text-[13px] font-medium text-pmn-green hover:bg-pmn-green/[.06] hover:text-pmn-green"
+                    onClick={() => {
+                      const q = aiQuery.trim();
+                      setAiMode(false);
+                      setAiResults(null);
+                      setSearchTerm(q);
+                    }}
+                  >
+                    Essayer la recherche classique
+                  </Button>
+                </div>
+              ) : (
+                <div className="divide-y divide-[rgba(20,33,28,.055)]">
+                  {aiResults?.map(result => (
+                    <button
+                      key={`ai-${result.objectId}`}
+                      onClick={() => handleAiResultClick(result)}
+                      className="flex w-full items-center gap-3 px-[18px] py-[10px] text-left transition-colors hover:bg-pmn-hover"
+                    >
+                      {result.type === 'dossier' ? (
+                        <FolderGlyph size={36} />
+                      ) : (
+                        <FileTile name={result.name} size={36} />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-[9px]">
+                          {result.folder_number && (
+                            <span className="flex-none rounded-[5px] border border-[rgba(20,33,28,.06)] bg-[#F1F0EB] px-1.5 py-0.5 font-mono text-[11px] text-pmn-faint2">
+                              {result.folder_number}
+                            </span>
+                          )}
+                          <span className="truncate text-[14.5px] font-semibold text-pmn-ink">{result.name}</span>
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-pmn-faint">📁 {result.path}</p>
+                        {result.raison && (
+                          <p className="mt-1 text-xs italic text-pmn-gold-dark">
+                            <Sparkles className="mr-1 inline h-3 w-3" />
+                            {result.raison}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex flex-none items-center gap-1.5">
+                        {result.rubrique && (
+                          <span className="rounded-[20px] bg-pmn-green/[.08] px-2 py-0.5 text-[11px] font-semibold text-pmn-green">
+                            {result.rubrique}
+                          </span>
+                        )}
+                        {result.category && (
+                          <span className="hidden rounded-[20px] bg-pmn-gold/[.14] px-2 py-0.5 text-[11px] font-semibold text-pmn-gold-dark sm:inline">
+                            {result.category}
+                          </span>
+                        )}
+                        {result.createdAt && (
+                          <span className="hidden text-xs text-pmn-faint md:inline">
+                            {format(new Date(result.createdAt), 'dd/MM/yyyy', { locale: fr })}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : deepSearchActive ? (
         <div className="surface overflow-hidden p-0">
           <div className="flex items-center justify-between border-b border-border px-[18px] py-3.5">
             <p className="text-sm font-semibold text-pmn-ink">
