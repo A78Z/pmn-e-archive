@@ -75,15 +75,19 @@ export default function LoginPage() {
       }
 
       const redirectTo = searchParams.get('redirect');
-      const destination =
+      let destination =
         redirectTo && redirectTo.startsWith('/') ? redirectTo : '/dashboard';
 
-      // Save session token to cookie for middleware
+      // Save session token to cookie for middleware + gérer le changement forcé
       if (typeof window !== 'undefined') {
         const Parse = (await import('@/lib/parse')).Parse;
         const currentUser = Parse.User.current();
         if (currentUser) {
           document.cookie = `parse-session-token=${currentUser.getSessionToken()}; path=/; max-age=${rememberMe ? 2592000 : 86400}`;
+          // Changement de mot de passe forcé (comptes créés par l'admin)
+          if (currentUser.get('must_change_password')) {
+            destination = '/change-password';
+          }
         }
       }
 
