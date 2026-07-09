@@ -157,6 +157,50 @@ export const DocumentHelpers = {
     },
 
     /**
+     * Recherche un doublon existant : d'abord par empreinte (exact, certain),
+     * puis par nom + taille (probable). Lecture seule.
+     */
+    async findDuplicate({ hash, name, size }: { hash?: string; name?: string; size?: number }) {
+        if (hash) {
+            const q = new Parse.Query(ParseClasses.DOCUMENT);
+            q.equalTo('file_hash', hash);
+            q.limit(1);
+            const r = await q.first();
+            if (r) return { type: 'exact' as const, doc: parseObjectToJSON(r) as any };
+        }
+        if (name && typeof size === 'number') {
+            const q = new Parse.Query(ParseClasses.DOCUMENT);
+            q.equalTo('name', name);
+            q.equalTo('file_size', size);
+            q.limit(1);
+            const r = await q.first();
+            if (r) return { type: 'probable' as const, doc: parseObjectToJSON(r) as any };
+        }
+        return null;
+    },
+
+    /**
+     * Scan complet des métadonnées de documents pour le rapport « Doublons »
+     * (nom, taille, empreinte, dossier, date). Paginé. Lecture seule.
+     */
+    async scanForDuplicates() {
+        const all: any[] = [];
+        let skip = 0;
+        for (;;) {
+            const q = new Parse.Query(ParseClasses.DOCUMENT);
+            q.select('name', 'file_size', 'file_hash', 'folder_id', 'file_path', 'createdAt');
+            q.limit(1000);
+            q.skip(skip);
+            q.ascending('objectId');
+            const page = await q.find();
+            all.push(...page.map(parseObjectToJSON));
+            if (page.length < 1000) break;
+            skip += 1000;
+        }
+        return all;
+    },
+
+    /**
      * Recherche approfondie côté serveur (toute l'arborescence, casse-insensible).
      * La requête est TOKENISÉE (mots vides FR retirés) : un document correspond
      * s'il contient AU MOINS UN token dans nom / catégorie / rubrique / mots_cles.
@@ -435,6 +479,40 @@ export const FolderHelpers = {
         query.limit(ids.length);
         const results = await query.find();
         return results.map(parseObjectToJSON);
+    },
+
+    /**
+     * Résout les chemins complets d'un lot de dossiers (id → « A > B > C »),
+     * en ne chargeant QUE les dossiers concernés + leurs ancêtres.
+     */
+    async resolvePaths(ids: string[]): Promise<Record<string, string>> {
+        const cache = new Map<string, any>();
+        let toFetch = [...new Set(ids.filter(Boolean))];
+        let guard = 0;
+        while (toFetch.length > 0 && guard < 15) {
+            const folders = await this.getByIds(toFetch);
+            folders.forEach((f: any) => cache.set(f.id, f));
+            const missing = new Set<string>();
+            for (const [, f] of cache) {
+                const p = (f as any).parent_id;
+                if (p && !cache.has(p)) missing.add(p);
+            }
+            toFetch = [...missing];
+            guard++;
+        }
+        const pathOf = (id: string): string => {
+            const parts: string[] = [];
+            let cur = cache.get(id);
+            let g = 0;
+            while (cur && g++ < 20) {
+                parts.unshift(cur.name);
+                cur = cur.parent_id ? cache.get(cur.parent_id) : null;
+            }
+            return parts.join(' > ') || 'Racine';
+        };
+        const out: Record<string, string> = {};
+        [...new Set(ids.filter(Boolean))].forEach(id => { out[id] = pathOf(id); });
+        return out;
     },
 
     /**

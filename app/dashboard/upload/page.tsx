@@ -15,6 +15,7 @@ import { useRouter } from 'next/navigation';
 import { sanitizeFilenames, needsSanitization, validateFilename } from '@/lib/filename-utils';
 import { ExtBadge } from '@/components/pmn-icons';
 import { DestinationPicker } from '@/components/destination-picker';
+import { computeSHA256, formatBytes } from '@/lib/file-hash';
 
 interface FolderOption {
   id: string;
@@ -24,6 +25,12 @@ interface FolderOption {
 
 type FileStatus = 'pending' | 'uploading' | 'success' | 'error';
 
+interface DuplicateInfo {
+  type: 'exact' | 'probable';
+  name: string;
+  path: string;
+}
+
 interface FileUploadState {
   file: File;
   originalName: string;
@@ -32,6 +39,12 @@ interface FileUploadState {
   status: FileStatus;
   error?: string;
   progress: number;
+  // Détection de doublons (additif)
+  fileHash?: string;
+  fileSize?: number;
+  checking?: boolean;        // détection de doublon en cours
+  duplicate?: DuplicateInfo; // doublon détecté (avertissement non bloquant)
+  skip?: boolean;            // « Ignorer ce fichier » choisi par l'utilisateur
 }
 
 export default function UploadPage() {
@@ -41,6 +54,8 @@ export default function UploadPage() {
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   const [fileStates, setFileStates] = useState<FileUploadState[]>([]);
+  const fileStatesRef = useRef<FileUploadState[]>([]);
+  useEffect(() => { fileStatesRef.current = fileStates; }, [fileStates]);
   const [category, setCategory] = useState<string | undefined>(undefined);
   const [destinationFolder, setDestinationFolder] = useState<string | undefined>(undefined);
   const [destinationPath, setDestinationPath] = useState<string>('');
@@ -195,6 +210,7 @@ export default function UploadPage() {
   };
 
   const processFiles = (files: File[]) => {
+    const baseIndex = fileStatesRef.current.length;
     const newFileStates: FileUploadState[] = files.map((file) => {
       const { valid, errors } = validateFilename(file.name);
 
@@ -205,11 +221,67 @@ export default function UploadPage() {
         renamed: false,
         status: valid ? 'pending' : 'error',
         error: valid ? undefined : errors.join(', '),
-        progress: 0
+        progress: 0,
+        fileSize: file.size,
+        checking: true,
       };
     });
 
     setFileStates(prev => [...prev, ...newFileStates]);
+
+    // Détection de doublons en arrière-plan (non bloquante)
+    files.forEach((file, i) => {
+      detectDuplicate(file, baseIndex + i);
+    });
+  };
+
+  // Calcule l'empreinte SHA-256 et cherche un doublon existant (exact puis
+  // nom+taille). N'empêche jamais l'upload : simple avertissement.
+  const detectDuplicate = async (file: File, index: number) => {
+    let hash: string | undefined;
+    try {
+      hash = await computeSHA256(file);
+    } catch (e) {
+      console.warn('Hash impossible pour', file.name, e);
+    }
+    try {
+      const match = await DocumentHelpers.findDuplicate({ hash, name: file.name, size: file.size });
+      let duplicate: DuplicateInfo | undefined;
+      if (match) {
+        const folderId = match.doc.folder_id as string | undefined;
+        const path = folderId
+          ? (await FolderHelpers.resolvePaths([folderId]))[folderId] || 'Racine'
+          : 'Racine';
+        duplicate = { type: match.type, name: match.doc.name, path };
+      }
+      setFileStates(prev => {
+        const updated = [...prev];
+        // Retrouver la ligne par référence de fichier (l'index peut avoir bougé)
+        const idx = updated.findIndex(fs => fs.file === file);
+        const target = idx >= 0 ? idx : index;
+        if (updated[target]) {
+          updated[target] = { ...updated[target], fileHash: hash, checking: false, duplicate };
+        }
+        return updated;
+      });
+    } catch (e) {
+      console.warn('Détection doublon échouée pour', file.name, e);
+      setFileStates(prev => {
+        const updated = [...prev];
+        const idx = updated.findIndex(fs => fs.file === file);
+        if (idx >= 0) updated[idx] = { ...updated[idx], fileHash: hash, checking: false };
+        return updated;
+      });
+    }
+  };
+
+  // « Ignorer ce fichier » / « Importer quand même »
+  const setSkipFile = (index: number, skip: boolean) => {
+    setFileStates(prev => {
+      const updated = [...prev];
+      if (updated[index]) updated[index] = { ...updated[index], skip };
+      return updated;
+    });
   };
 
   const handleRename = (index: number, newName: string) => {
@@ -298,13 +370,15 @@ export default function UploadPage() {
         return updated;
       });
 
-      // Create document record
+      // Create document record (empreinte enregistrée pour accélérer les
+      // futures détections de doublons)
       await DocumentHelpers.create({
         name: fileState.sanitizedName,
         description: description || null,
         file_path: fileUrl,
         file_size: fileState.file.size,
         file_type: fileState.file.type,
+        file_hash: fileState.fileHash || null,
         folder_id: destinationFolder || null,
         category: category,
         uploaded_by: profile?.id,
@@ -345,9 +419,9 @@ export default function UploadPage() {
 
     setUploading(true);
 
-    // Filter pending files
+    // Filter pending files (hors fichiers explicitement ignorés pour doublon)
     const pendingFiles = fileStates.map((fs, index) => ({ fs, index }))
-      .filter(({ fs }) => fs.status === 'pending');
+      .filter(({ fs }) => fs.status === 'pending' && !fs.skip);
 
     if (pendingFiles.length === 0) {
       toast.error('Aucun fichier en attente');
@@ -416,7 +490,7 @@ export default function UploadPage() {
   const totalFiles = fileStates.length;
   const successCount = fileStates.filter(fs => fs.status === 'success').length;
   const errorCount = fileStates.filter(fs => fs.status === 'error').length;
-  const pendingCount = fileStates.filter(fs => fs.status === 'pending').length;
+  const pendingCount = fileStates.filter(fs => fs.status === 'pending' && !fs.skip).length;
   const uploadingCount = fileStates.filter(fs => fs.status === 'uploading').length;
   // const renamedCount = fileStates.filter(fs => fs.renamed).length; // No longer used
 
@@ -579,6 +653,48 @@ export default function UploadPage() {
                               style={{ width: `${fileState.status === 'success' ? 100 : fileState.progress}%` }}
                             />
                           </div>
+                        )}
+
+                        {/* Avertissement de doublon (non bloquant) */}
+                        {fileState.duplicate && fileState.status !== 'success' && (
+                          <div className={`mt-2 rounded-[9px] border p-2 text-xs ${fileState.skip ? 'border-border bg-pmn-hover' : 'border-pmn-gold/40 bg-pmn-gold/[.08]'}`}>
+                            {fileState.skip ? (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-pmn-faint">Fichier ignoré (doublon) — ne sera pas importé.</span>
+                                <button
+                                  onClick={() => setSkipFile(index, false)}
+                                  className="flex-none font-semibold text-pmn-green hover:underline"
+                                >
+                                  Rétablir
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <p className="font-semibold text-pmn-gold-dark">
+                                  {fileState.duplicate.type === 'exact'
+                                    ? '⚠️ Fichier identique déjà présent'
+                                    : '⚠️ Ce fichier semble déjà présent'}
+                                </p>
+                                <p className="mt-0.5 text-pmn-text2">
+                                  « {fileState.duplicate.name} » dans <span className="font-medium">{fileState.duplicate.path}</span>
+                                  {fileState.duplicate.type === 'probable' && ' (même nom et taille)'}
+                                </p>
+                                <div className="mt-1.5 flex gap-2">
+                                  <button
+                                    onClick={() => setSkipFile(index, true)}
+                                    className="rounded-[7px] border border-pmn-green/30 px-2 py-0.5 font-semibold text-pmn-green hover:bg-pmn-green/[.06]"
+                                  >
+                                    Ignorer ce fichier
+                                  </button>
+                                  <span className="py-0.5 text-pmn-faint">ou</span>
+                                  <span className="py-0.5 text-pmn-faint">Importer quand même (par défaut)</span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        )}
+                        {fileState.checking && fileState.status !== 'success' && (
+                          <p className="mt-1 text-[11px] text-pmn-faint">Vérification des doublons…</p>
                         )}
                       </div>
                     </div>

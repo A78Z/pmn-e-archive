@@ -18,6 +18,7 @@ import {
   LogOut,
   Users,
   ChevronRight,
+  Copy,
 } from 'lucide-react';
 import { NotificationsBell } from '@/components/notifications-bell';
 import { useAuth } from '@/lib/parse-auth';
@@ -34,6 +35,7 @@ const CRUMBS: Record<string, string> = {
   '/dashboard/access-requests': "Demandes d'accès",
   '/dashboard/administration': 'Administration',
   '/dashboard/users': 'Gestion Utilisateurs',
+  '/dashboard/duplicates': 'Doublons',
   '/dashboard/cleanup': 'Nettoyage',
 };
 
@@ -138,6 +140,14 @@ function SidebarInner({
               href="/dashboard/administration"
               badge={null}
               active={pathname === '/dashboard/administration'}
+              onNavigate={onNavigate}
+            />
+            <NavButton
+              icon={Copy}
+              label="Doublons"
+              href="/dashboard/duplicates"
+              badge={null}
+              active={pathname === '/dashboard/duplicates'}
               onNavigate={onNavigate}
             />
             {profile.role === 'super_admin' && (
