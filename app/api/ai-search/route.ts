@@ -17,6 +17,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { tokenizeQuery, normalizeText } from '@/lib/search-tokens';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -142,28 +143,9 @@ async function getCatalog(): Promise<CatalogItem[]> {
 
 // ---------------------------------------------------------------------------
 // Pré-filtrage serveur → liste courte (maîtrise des coûts de tokens)
+// Tokenisation partagée avec la recherche classique (lib/search-tokens).
 // ---------------------------------------------------------------------------
-function normalize(text: string): string {
-    return text
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[̀-ͯ]/g, ''); // sans accents
-}
-
-/** Mots vides français : ignorés par le scoring (bruit). */
-const STOPWORDS = new Set([
-    'de', 'des', 'du', 'la', 'le', 'les', 'un', 'une', 'et', 'en', 'au', 'aux',
-    'ce', 'ces', 'cette', 'ma', 'mon', 'mes', 'sa', 'son', 'ses', 'qui', 'que',
-    'quoi', 'dont', 'ou', 'où', 'pour', 'par', 'sur', 'dans', 'avec', 'sans',
-    'tous', 'tout', 'toute', 'toutes', 'plus', 'moins', 'tres', 'est', 'sont',
-    'je', 'tu', 'il', 'elle', 'nous', 'vous', 'ils', 'elles', 'me', 'te', 'se',
-]);
-
-function tokenize(query: string): string[] {
-    return normalize(query)
-        .split(/[^a-z0-9-]+/)
-        .filter(t => t.length >= 2 && !STOPWORDS.has(t));
-}
+const normalize = normalizeText;
 
 function scoreItem(item: CatalogItem, tokens: string[]): number {
     const haystacks: Array<[string, number]> = [
@@ -187,7 +169,7 @@ function scoreItem(item: CatalogItem, tokens: string[]): number {
 }
 
 function shortlist(catalog: CatalogItem[], query: string): CatalogItem[] {
-    const tokens = tokenize(query);
+    const tokens = tokenizeQuery(query);
     if (tokens.length === 0) return [];
 
     const scored = catalog
@@ -207,6 +189,103 @@ function shortlist(catalog: CatalogItem[], query: string): CatalogItem[] {
         candidates = [...candidates, ...extraFolders];
     }
     return candidates;
+}
+
+// ---------------------------------------------------------------------------
+// Catégorisation des erreurs (jamais de secret exposé/journalisé)
+// ---------------------------------------------------------------------------
+type AiReason =
+    | 'ok'
+    | 'missing_key'   // clé absente de l'environnement
+    | 'auth'          // 401/403 : clé invalide / révoquée
+    | 'billing'       // 400 crédits insuffisants / facturation
+    | 'model'         // 404 : modèle inconnu
+    | 'rate_limit'    // 429
+    | 'network'       // réseau / timeout
+    | 'bad_response'  // réponse non conforme (JSON invalide)
+    | 'unknown';
+
+/** Erreur typée transportant une catégorie (jamais la clé). */
+class AiError extends Error {
+    reason: AiReason;
+    constructor(reason: AiReason, detail: string) {
+        super(detail);
+        this.reason = reason;
+    }
+}
+
+/** Catégorise un échec HTTP Anthropic à partir du statut + message d'erreur. */
+function categorizeHttp(status: number, message: string): AiReason {
+    const m = (message || '').toLowerCase();
+    if (status === 401 || status === 403) return 'auth';
+    if (status === 429) return 'rate_limit';
+    if (status === 404) return 'model';
+    if (status === 400) {
+        if (m.includes('credit') || m.includes('billing') || m.includes('balance') || m.includes('quota')) {
+            return 'billing';
+        }
+        if (m.includes('model')) return 'model';
+        return 'unknown';
+    }
+    if (status >= 500) return 'unknown';
+    return 'unknown';
+}
+
+/** Messages utilisateur (sobres) associés à chaque catégorie. */
+const REASON_MESSAGES: Record<AiReason, string> = {
+    ok: 'OK',
+    missing_key: "La recherche IA n'est pas configurée (clé API absente côté serveur).",
+    auth: "La recherche IA est indisponible (clé API invalide).",
+    billing: "La recherche IA est indisponible (crédits API épuisés).",
+    model: "La recherche IA est indisponible (modèle non disponible).",
+    rate_limit: "La recherche IA est temporairement surchargée. Réessayez dans un instant.",
+    network: "La recherche IA est momentanément injoignable.",
+    bad_response: "La recherche IA a renvoyé une réponse inattendue.",
+    unknown: "L'assistant IA est momentanément indisponible.",
+};
+
+/**
+ * Appel minimal à l'API (max_tokens: 1) pour l'endpoint de santé.
+ * Retourne une catégorie ; ne lève jamais, n'expose jamais la clé.
+ */
+async function anthropicPing(): Promise<AiReason> {
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return 'missing_key';
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+        const res = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: ANTHROPIC_MODEL,
+                max_tokens: 1,
+                messages: [{ role: 'user', content: 'ping' }],
+            }),
+            signal: controller.signal,
+        });
+        if (res.ok) return 'ok';
+        let message = '';
+        try {
+            const body = await res.json();
+            message = body?.error?.message || '';
+        } catch {
+            /* ignore */
+        }
+        const reason = categorizeHttp(res.status, message);
+        console.error(`[ai-search:health] appel test échoué — status=${res.status} reason=${reason} message="${message.slice(0, 160)}"`);
+        return reason;
+    } catch (e: any) {
+        console.error('[ai-search:health] erreur réseau/timeout:', e?.name || e?.message);
+        return 'network';
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -236,9 +315,11 @@ function candidateLine(item: CatalogItem): string {
 }
 
 async function callAnthropic(query: string, candidates: CatalogItem[]): Promise<{ results: any[]; reponse?: string }> {
+    // 1. Vérifier la présence de la clé EN PREMIER (pas d'appel réseau inutile)
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-        throw new Error('ANTHROPIC_API_KEY_MISSING');
+        console.error("[ai-search] ANTHROPIC_API_KEY manquante dans l'environnement");
+        throw new AiError('missing_key', 'ANTHROPIC_API_KEY absente');
     }
 
     const userContent =
@@ -249,8 +330,10 @@ async function callAnthropic(query: string, candidates: CatalogItem[]): Promise<
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
 
+    // 2. Appel réseau — les erreurs réseau/timeout sont catégorisées 'network'
+    let res: Response;
     try {
-        const res = await fetch('https://api.anthropic.com/v1/messages', {
+        res = await fetch('https://api.anthropic.com/v1/messages', {
             method: 'POST',
             headers: {
                 'x-api-key': apiKey,
@@ -265,30 +348,46 @@ async function callAnthropic(query: string, candidates: CatalogItem[]): Promise<
             }),
             signal: controller.signal,
         });
+    } catch (e: any) {
+        clearTimeout(timeout);
+        console.error('[ai-search] erreur réseau/timeout:', e?.name || e?.message);
+        throw new AiError('network', e?.name || 'network error');
+    }
+    clearTimeout(timeout);
 
-        if (!res.ok) {
-            const detail = await res.text().catch(() => '');
-            throw new Error(`ANTHROPIC_HTTP_${res.status}: ${detail.slice(0, 200)}`);
+    // 3. Erreur HTTP → catégorisée (auth / billing / model / rate_limit / unknown)
+    if (!res.ok) {
+        let message = '';
+        try {
+            const body = await res.json();
+            message = body?.error?.message || '';
+        } catch {
+            /* réponse non JSON */
         }
+        const reason = categorizeHttp(res.status, message);
+        // Journalisation détaillée côté serveur (message SANS la clé)
+        console.error(`[ai-search] appel API échoué — status=${res.status} reason=${reason} message="${message.slice(0, 200)}"`);
+        throw new AiError(reason, `HTTP ${res.status}`);
+    }
 
+    // 4. Parsing défensif de la réponse JSON
+    try {
         const data = await res.json();
         let text: string = data?.content?.[0]?.text ?? '';
-
-        // Parsing défensif : retirer d'éventuelles fences ```json ... ```
         text = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
         const firstBrace = text.indexOf('{');
         const lastBrace = text.lastIndexOf('}');
         if (firstBrace >= 0 && lastBrace > firstBrace) {
             text = text.slice(firstBrace, lastBrace + 1);
         }
-
         const parsed = JSON.parse(text);
         if (!Array.isArray(parsed.results)) {
-            throw new Error('ANTHROPIC_BAD_JSON: champ results manquant');
+            throw new Error('champ results manquant');
         }
         return parsed;
-    } finally {
-        clearTimeout(timeout);
+    } catch (e: any) {
+        console.error('[ai-search] réponse IA non conforme:', e?.message);
+        throw new AiError('bad_response', e?.message || 'réponse invalide');
     }
 }
 
@@ -376,22 +475,46 @@ export async function POST(req: NextRequest) {
             });
 
         return NextResponse.json({
+            ok: true,
             results,
             reponse: typeof ai.reponse === 'string' ? ai.reponse.slice(0, 600) : undefined,
         });
     } catch (error: any) {
-        console.error('[ai-search] error:', error?.message || error);
+        // Erreurs catégorisées (jamais la clé exposée ni journalisée en clair)
+        const reason: AiReason = error instanceof AiError ? error.reason : 'unknown';
+        if (!(error instanceof AiError)) {
+            console.error('[ai-search] erreur inattendue:', error?.message || error);
+        }
 
-        const missingKey = String(error?.message || '').includes('ANTHROPIC_API_KEY_MISSING');
+        // Le statut HTTP reflète la catégorie ; le client bascule sur la
+        // recherche classique dans tous les cas (fallback: true).
+        const status =
+            reason === 'missing_key' ? 503 :
+            reason === 'rate_limit' ? 429 :
+            reason === 'auth' || reason === 'billing' || reason === 'model' ? 503 :
+            502;
+
         return NextResponse.json(
             {
-                error: missingKey
-                    ? "La recherche IA n'est pas configurée (clé API absente côté serveur)."
-                    : "L'assistant IA est momentanément indisponible.",
-                // Le client bascule sur la recherche approfondie classique
+                ok: false,
+                reason,
+                error: REASON_MESSAGES[reason],
                 fallback: true,
             },
-            { status: missingKey ? 503 : 502 }
+            { status }
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Handler GET — endpoint de santé (aucun secret exposé)
+// Ouvrir /api/ai-search dans le navigateur → { keyPresent, testCall }
+// ---------------------------------------------------------------------------
+export async function GET() {
+    const keyPresent = Boolean(process.env.ANTHROPIC_API_KEY);
+    if (!keyPresent) {
+        return NextResponse.json({ keyPresent: false, testCall: 'missing_key' as AiReason });
+    }
+    const testCall = await anthropicPing();
+    return NextResponse.json({ keyPresent: true, testCall });
 }

@@ -444,8 +444,12 @@ export default function DocumentsPage() {
 
       if (!res.ok) {
         if (data?.fallback) {
-          // Repli : recherche approfondie classique (Étape A)
-          toast.info(`${data.error || 'Recherche IA indisponible'} — recherche classique utilisée.`);
+          // Repli : recherche approfondie classique (Étape A).
+          // Pour les admins : indiquer discrètement la catégorie de cause
+          // (missing_key / billing / auth / model / network…) pour le dépannage.
+          const isAdmin = ['admin', 'super_admin'].includes(profile?.role || '');
+          const reasonHint = isAdmin && data?.reason ? ` [cause : ${data.reason}]` : '';
+          toast.info(`${data.error || 'Recherche IA indisponible'} — recherche classique utilisée.${reasonHint}`);
           setAiMode(false);
           setAiResults(null);
           setSearchTerm(query);

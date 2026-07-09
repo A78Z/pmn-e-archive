@@ -1,6 +1,7 @@
 'use client';
 
 import { Parse, ParseClasses, parseObjectToJSON, handleParseError } from './parse';
+import { tokenizeQuery, normalizeText } from './search-tokens';
 
 /**
  * Helper functions for common Parse operations
@@ -8,6 +9,26 @@ import { Parse, ParseClasses, parseObjectToJSON, handleParseError } from './pars
 
 /** Échappe les caractères spéciaux d'une chaîne pour un usage en RegExp. */
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Compte le nombre de tokens distincts trouvés dans les champs cherchables
+ * d'un élément (pour classer les résultats par pertinence).
+ */
+const countTokenMatches = (item: any, tokens: string[]): number => {
+    const haystack = normalizeText(
+        [
+            item.name,
+            item.folder_number,
+            item.category,
+            item.rubrique,
+            item.exercice,
+            Array.isArray(item.mots_cles) ? item.mots_cles.join(' ') : '',
+        ]
+            .filter(Boolean)
+            .join(' ')
+    );
+    return tokens.reduce((acc, t) => (haystack.includes(t) ? acc + 1 : acc), 0);
+};
 
 /** Options communes de la recherche approfondie. */
 export interface DeepSearchOptions {
@@ -136,27 +157,42 @@ export const DocumentHelpers = {
     },
 
     /**
-     * Recherche approfondie côté serveur (toute l'arborescence, casse-insensible) :
-     * nom, catégorie, rubrique (regex i) + mot-clé exact (tableau mots_cles).
+     * Recherche approfondie côté serveur (toute l'arborescence, casse-insensible).
+     * La requête est TOKENISÉE (mots vides FR retirés) : un document correspond
+     * s'il contient AU MOINS UN token dans nom / catégorie / rubrique / mots_cles.
+     * Les résultats sont classés par nombre de tokens correspondants (pertinence).
      * Requête indépendante : ne recharge pas l'arbre, ne casse pas le lazy-loading.
      */
     async searchDeep(term: string, options: DeepSearchOptions = {}) {
-        const regex = new RegExp(escapeRegex(term), 'i');
+        const tokens = tokenizeQuery(term);
+        // Si aucun token significatif (que des mots vides), retomber sur le terme brut
+        const searchTokens = tokens.length > 0 ? tokens : [term.trim()].filter(Boolean);
+        if (searchTokens.length === 0) return [];
 
-        const byName = new Parse.Query(ParseClasses.DOCUMENT);
-        byName.matches('name', regex);
-        const byCategory = new Parse.Query(ParseClasses.DOCUMENT);
-        byCategory.matches('category', regex);
-        const byRubrique = new Parse.Query(ParseClasses.DOCUMENT);
-        byRubrique.matches('rubrique', regex);
-        const byTag = new Parse.Query(ParseClasses.DOCUMENT);
-        byTag.equalTo('mots_cles', term); // correspondance exacte d'un tag
+        // OR : pour chaque token, correspondance sur nom / catégorie / rubrique / mots_cles
+        const subQueries: any[] = [];
+        for (const token of searchTokens) {
+            const regex = new RegExp(escapeRegex(token), 'i');
+            const byName = new Parse.Query(ParseClasses.DOCUMENT);
+            byName.matches('name', regex);
+            const byCategory = new Parse.Query(ParseClasses.DOCUMENT);
+            byCategory.matches('category', regex);
+            const byRubrique = new Parse.Query(ParseClasses.DOCUMENT);
+            byRubrique.matches('rubrique', regex);
+            const byTag = new Parse.Query(ParseClasses.DOCUMENT);
+            byTag.matches('mots_cles', regex); // regex sur les éléments du tableau
+            subQueries.push(byName, byCategory, byRubrique, byTag);
+        }
 
-        const query = Parse.Query.or(byName, byCategory, byRubrique, byTag);
+        const query = (Parse.Query.or as any)(...subQueries);
         applyDeepSearchFilters(query, options);
         query.descending('createdAt');
         const results = await query.find();
-        return results.map(parseObjectToJSON);
+
+        // Classement par pertinence (nb de tokens correspondants), date en secondaire
+        return results
+            .map(parseObjectToJSON as any)
+            .sort((a: any, b: any) => countTokenMatches(b, searchTokens) - countTokenMatches(a, searchTokens));
     },
 };
 
@@ -359,28 +395,39 @@ export const FolderHelpers = {
     },
 
     /**
-     * Recherche approfondie côté serveur sur les dossiers :
-     * nom, cote (folder_number), catégorie, rubrique (regex i) + mot-clé exact.
+     * Recherche approfondie côté serveur sur les dossiers (tokenisée).
+     * Un dossier correspond s'il contient AU MOINS UN token dans nom / cote /
+     * catégorie / rubrique / mots_cles. Classement par pertinence.
      */
     async searchDeep(term: string, options: DeepSearchOptions = {}) {
-        const regex = new RegExp(escapeRegex(term), 'i');
+        const tokens = tokenizeQuery(term);
+        const searchTokens = tokens.length > 0 ? tokens : [term.trim()].filter(Boolean);
+        if (searchTokens.length === 0) return [];
 
-        const byName = new Parse.Query(ParseClasses.FOLDER);
-        byName.matches('name', regex);
-        const byNumber = new Parse.Query(ParseClasses.FOLDER);
-        byNumber.matches('folder_number', regex);
-        const byCategory = new Parse.Query(ParseClasses.FOLDER);
-        byCategory.matches('category', regex);
-        const byRubrique = new Parse.Query(ParseClasses.FOLDER);
-        byRubrique.matches('rubrique', regex);
-        const byTag = new Parse.Query(ParseClasses.FOLDER);
-        byTag.equalTo('mots_cles', term); // correspondance exacte d'un tag
+        const subQueries: any[] = [];
+        for (const token of searchTokens) {
+            const regex = new RegExp(escapeRegex(token), 'i');
+            const byName = new Parse.Query(ParseClasses.FOLDER);
+            byName.matches('name', regex);
+            const byNumber = new Parse.Query(ParseClasses.FOLDER);
+            byNumber.matches('folder_number', regex);
+            const byCategory = new Parse.Query(ParseClasses.FOLDER);
+            byCategory.matches('category', regex);
+            const byRubrique = new Parse.Query(ParseClasses.FOLDER);
+            byRubrique.matches('rubrique', regex);
+            const byTag = new Parse.Query(ParseClasses.FOLDER);
+            byTag.matches('mots_cles', regex);
+            subQueries.push(byName, byNumber, byCategory, byRubrique, byTag);
+        }
 
-        const query = Parse.Query.or(byName, byNumber, byCategory, byRubrique, byTag);
+        const query = (Parse.Query.or as any)(...subQueries);
         applyDeepSearchFilters(query, options);
         query.ascending('name');
         const results = await query.find();
-        return results.map(parseObjectToJSON);
+
+        return results
+            .map(parseObjectToJSON as any)
+            .sort((a: any, b: any) => countTokenMatches(b, searchTokens) - countTokenMatches(a, searchTokens));
     },
 };
 
